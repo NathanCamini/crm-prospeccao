@@ -67,7 +67,8 @@ def test_contrato_sem_arquivo_do_mes(tmp_path) -> None:
 # ---------------------------------------------------------------- perfil
 def test_perfil_do_documento_carrega() -> None:
     perfil = carregar_perfil(RAIZ / "perfis", "amenities_hotel")
-    assert perfil.versao == 3 and perfil.filtro_sql.cnae_prefixos == ["5510", "5590"]
+    assert perfil.versao == 4 and perfil.filtro_sql.cnae_prefixos == ["5510", "5590"]
+    assert perfil.filtro_sql.capital_social_min is None and not perfil.filtro_sql.excluir_mei  # porte e capital: LLM
     assert perfil.saida_score == "0-100" and perfil.canal_preferido == ["email", "ligacao", "whatsapp_assistido"]
 
 

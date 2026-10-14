@@ -2,7 +2,7 @@
 
 Classifica, a cada mês, as empresas novas da Receita para cada produto, em duas etapas: o SQL elimina o grosso no DuckDB e o LLM (Gemini) decide só o que o SQL não decide. O resultado fica no banco do agente e sai num CSV que o módulo 3 entrega ao CRM.
 
-Medido em 2026-09: 674.928 empresas novas → **190** passaram no funil do perfil `amenities_hotel` em 1,6 s, antes de qualquer chamada ao LLM.
+Medido em 2026-09: das 674.928 empresas novas, o filtro de atividade do perfil `amenities_hotel` (hospedagem, CNAE 5510/5590) deixa cerca de 1.400 para o LLM, em segundos. Porte e capital não cortam no SQL: o modelo pesa esses dados.
 
 ```
 módulo 1 (etl/) ──► módulo 2 (este agente) ──► módulo 3 ──► CRM
@@ -133,7 +133,7 @@ Um arquivo por produto em `perfis/`; o nome do arquivo é o `id`.
 | `filtro_sql.cnae_prefixos` / `cnaes` | — | atividade; pelo menos um dos dois é obrigatório |
 | `filtro_sql.incluir_cnaes_secundarios` | `false` | também quem tem a atividade só como secundária |
 | `filtro_sql.situacao` | `[ATIVA]` | situação cadastral |
-| `filtro_sql.capital_social_min` / `_max` | — | faixa de capital social |
+| `filtro_sql.capital_social_min` / `_max` | — | faixa de capital social. Use com cuidado: corta antes do modelo ver a empresa (unidade de rede costuma abrir com capital baixo); prefira um critério em `criterios_llm` |
 | `filtro_sql.excluir_mei` | `false` | exclui MEI |
 | `filtro_sql.portes`, `ufs`, `matriz_filial` | — | demais filtros |
 | `criterios_llm` | — | perguntas que só o modelo responde |
@@ -201,7 +201,7 @@ Custo estimado por empresa, ao preço de lote:
 | Triagem (`gemini-2.5-flash-lite`) | ~600 de entrada, ~100 de saída | ~US$ 0,00005 |
 | Revisão (`gemini-3.8-flash`) | o mesmo, mais o raciocínio do modelo | ~US$ 0,0004 |
 
-Com 190 empresas por mês e cerca de 20% indo à revisão, o custo fica em centavos de dólar por perfil. O valor real de cada execução aparece em `custos`. A tabela de preços fica em `agente/llm.py` (fonte e data no código): os Gemini 3.6/3.8 Flash dobram de preço em 01/01/2027.
+Com cerca de 1.400 empresas por mês e uns 20% indo à revisão, o custo fica perto de US$ 0,20 por perfil. O valor real de cada execução aparece em `custos`. A tabela de preços fica em `agente/llm.py` (fonte e data no código): os Gemini 3.6/3.8 Flash dobram de preço em 01/01/2027.
 
 ## Privacidade (LGPD)
 
@@ -241,7 +241,6 @@ docker compose --profile testes run --rm testes-agente   # o mesmo, no contêine
 ## Pontos em aberto
 
 - **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. `agente checar --perfil P --lote` testa isso com uma empresa fictícia antes do mês inteiro.
-- **Capital mínimo no perfil de exemplo:** na base real de 2026-09, todas as 27 empresas com sinal de rede (Atlantica, Accor) têm capital de R$ 4.600 a R$ 50.000. Com `capital_social_min: 100000`, hotéis de bandeira ficam fora do funil. Revise se eles interessam.
 - **Franquia ou unidade própria:** sócio holding e e-mail da rede mostram que a unidade é da rede, mas não distinguem franquia de unidade própria. O modelo decide com os dados, e a rotulagem mede o acerto.
 
 ## Decisões
@@ -258,3 +257,4 @@ Numeração contínua com o README da raiz.
 | D62 | Banco próprio do agente (`agente.sqlite`), chave CNPJ × perfil × versão; reclassifica só se mudarem os dados enviados ou o prompt. | Cada módulo tem o próprio estado (como o `crm.sqlite`); rodar o mesmo mês de novo não gasta nada. |
 | D63 | O agente entrega ao módulo 3 um CSV (`exportar-crm`), gravado de uma vez, na pasta que o módulo 3 já lê. | É o formato que o módulo 3 simulado aceita (`MODULO2_CSV`); a cadeia segue elo a elo e o CRM não muda. O sinal por site saiu, porque o site vem do módulo 3, que roda depois do agente. |
 | D69 | `agente rotina`: classificação em lote de todos os perfis e exportação só quando nenhum lote está em andamento e há classificação nova (contagem e data da última gravada). | Roda a cada poucas horas sem gastar nada quando não há novidade, e o módulo 3 nunca recebe um CSV com metade dos perfis atualizados. |
+| D71 | O filtro SQL do perfil fica só com o que define o mercado do produto (atividade e situação); porte e capital viram critério do LLM. `amenities_hotel` v4 sem `capital_social_min` e `excluir_mei`. | Corte fixo de capital eliminava os hotéis de rede (capital de R$ 4.600 a R$ 50.000 em 2026-09). Com ~1.400 hospedagens por mês, o LLM em todas custa cerca de US$ 0,20. A atividade continua obrigatória (D57): sem ela, o mês inteiro iria ao LLM. |
