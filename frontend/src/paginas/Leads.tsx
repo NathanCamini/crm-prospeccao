@@ -323,10 +323,20 @@ export default function Leads() {
               </>
             ) : (
               <>
-                <p>Ainda não há leads para esta empresa. Os do agente aparecem depois que ele classificar o mês.</p>
-                <Link to="/leads/novo" className="botao">
-                  Cadastrar o primeiro lead
-                </Link>
+                <p>
+                  Ainda não há leads para esta empresa. Os do agente vêm dos produtos descritos em Produtos
+                  {eAdmin ? ": conte o que vocês vendem e para quem." : " (pelo administrador da empresa)."}
+                </p>
+                <div className="acoes">
+                  {eAdmin && (
+                    <Link to="/produtos" className="botao botao-primario">
+                      Descrever um produto
+                    </Link>
+                  )}
+                  <Link to="/leads/novo" className="botao">
+                    Cadastrar um lead à mão
+                  </Link>
+                </div>
               </>
             )}
           </div>

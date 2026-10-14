@@ -555,3 +555,26 @@ a.botao-texto { text-decoration: none; display: inline-block; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* ---------------------------------------------------------------- produtos */
+
+.produto { margin-bottom: 16px; }
+.produto-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
+.produto-topo h2 { margin-bottom: 2px; }
+.bloco-destaque { margin-bottom: 20px; }
+.proposta { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--linha); transition: opacity 0.15s; }
+.proposta h3 { margin-bottom: 6px; }
+.proposta > p { margin-bottom: 10px; }
+.proposta .tabela-compacta { margin: 8px 0 12px; }
+.proposta .tabela-compacta caption { text-align: left; margin: 0 0 4px; }
+.desatualizada { opacity: 0.55; }
+.como-procura { margin-top: 10px; font-size: 0.9rem; }
+.como-procura summary { cursor: pointer; color: var(--apoio); font-weight: 520; }
+.como-procura .dados { margin-top: 10px; grid-template-columns: 210px 1fr; }
+.lista-simples { margin: 0; padding-left: 18px; }
+.lista-simples li + li { margin-top: 2px; }
+
+@media (max-width: 720px) {
+  .produto-topo { flex-direction: column; }
+  .como-procura .dados { grid-template-columns: 1fr; }
+}

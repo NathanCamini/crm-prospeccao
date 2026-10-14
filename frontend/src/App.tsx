@@ -14,6 +14,7 @@ import Ficha from "./paginas/Ficha";
 import Leads from "./paginas/Leads";
 import Modelos from "./paginas/Modelos";
 import NovoLead from "./paginas/NovoLead";
+import Produtos from "./paginas/Produtos";
 import Relatorios from "./paginas/Relatorios";
 import Supressao from "./paginas/Supressao";
 import { ROTULO_PAPEL, SessaoProvider, useSessao } from "./sessao";
@@ -96,6 +97,7 @@ function Moldura({ aoSair }: { aoSair: () => void }) {
               {eAdmin && (
                 <>
                   <span className="nav-divisor" role="separator" />
+                  <NavLink to="/produtos">Produtos</NavLink>
                   <NavLink to="/equipe">Equipe</NavLink>
                   <NavLink to="/relatorios">Relatórios</NavLink>
                 </>
@@ -127,6 +129,7 @@ function Moldura({ aoSair }: { aoSair: () => void }) {
               <Route path="/agente" element={<Agente />} />
               <Route path="/modelos" element={<Modelos />} />
               <Route path="/supressao" element={<Supressao />} />
+              {eAdmin && <Route path="/produtos" element={<Produtos />} />}
               {eAdmin && <Route path="/equipe" element={<Equipe />} />}
               {eAdmin && <Route path="/relatorios" element={<Relatorios />} />}
             </>
