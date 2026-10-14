@@ -148,7 +148,8 @@ def criar_app(repo: Repositorio | None = None, fonte: Fonte | None = None, enriq
         lead = r.obter(p.cnpj.upper()) if p.cnpj else None
         if p.cnpj and not lead and p.contexto is None:
             raise HTTPException(404, "Empresa não encontrada no módulo 3.")
-        contexto = lead.model_dump(mode="json") if lead else p.contexto
+        # O CRM manda o lead como a empresa o vê (com a classificação do produto dela); sem isso, o daqui.
+        contexto = p.contexto if p.contexto is not None else (lead.model_dump(mode="json") if lead else None)
         if not agente:
             if lead is None and contexto:
                 nome = contexto.get("nome_fantasia") or contexto.get("razao_social") or "esta empresa"

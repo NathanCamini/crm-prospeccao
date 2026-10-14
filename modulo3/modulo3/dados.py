@@ -61,9 +61,10 @@ class Repositorio:
     def perfis(self) -> list[Perfil]:
         contagem: dict[str, int] = {}
         for lead in self.leads:
-            if lead.classificacao.e_alvo:
-                contagem[lead.classificacao.perfil_id] = contagem.get(lead.classificacao.perfil_id, 0) + 1
-        ids = sorted({lead.classificacao.perfil_id for lead in self.leads})
+            for c in classificacoes(lead):
+                if c.e_alvo:
+                    contagem[c.perfil_id] = contagem.get(c.perfil_id, 0) + 1
+        ids = sorted({c.perfil_id for lead in self.leads for c in classificacoes(lead)})
         return [
             Perfil(
                 id=pid,
@@ -82,13 +83,11 @@ class Repositorio:
         excluir = set(f.excluir_cnpjs)
 
         def passa(lead: Lead) -> bool:
-            c = lead.classificacao
-            if f.so_alvos and not c.e_alvo:
+            cs = [c for c in classificacoes(lead)
+                  if (not f.perfil_id or c.perfil_id == f.perfil_id) and (not f.perfis or c.perfil_id in f.perfis)]
+            if not cs or (f.so_alvos and not any(c.e_alvo for c in cs)):
                 return False
-            if f.perfil_id and c.perfil_id != f.perfil_id:
-                return False
-            if f.perfis and c.perfil_id not in f.perfis:
-                return False
+            c = max(cs, key=lambda x: (x.e_alvo, x.score))
             if ufs and (lead.uf or "") not in ufs:
                 return False
             if municipio and municipio not in sem_acento(lead.municipio):
@@ -123,6 +122,23 @@ class Repositorio:
             itens=self._completar(encontrados[inicio : inicio + f.por_pagina]),
             cnpjs=[lead.cnpj for lead in encontrados] if f.apenas_cnpjs else None,
         )
+
+
+def classificacoes(lead: Lead) -> list[Classificacao]:
+    return lead.classificacoes or [lead.classificacao]
+
+
+def agrupar(linhas: list[Lead]) -> list[Lead]:
+    """Uma linha do CSV por CNPJ × perfil vira um lead por CNPJ, com todas as classificações."""
+    por_cnpj: dict[str, list[Lead]] = {}
+    for lead in linhas:
+        por_cnpj.setdefault(lead.cnpj, []).append(lead)
+    leads = []
+    for grupo in por_cnpj.values():
+        todas = sorted((g.classificacao for g in grupo), key=lambda c: (not c.e_alvo, -c.score, c.perfil_id))
+        base = grupo[0]
+        leads.append(base.model_copy(update={"classificacao": todas[0], "classificacoes": todas if len(todas) > 1 else []}))
+    return leads
 
 
 # ---------------------------------------------------------------- CSV do módulo 2
@@ -222,7 +238,7 @@ class Fonte:
                 if marca != self._marca:
                     try:
                         nomes: dict[str, dict] = {}
-                        leads = ler_csv_modulo2(self.csv, nomes)
+                        leads = agrupar(ler_csv_modulo2(self.csv, nomes))
                     except (OSError, ValueError, KeyError) as erro:
                         log.error("Não foi possível ler %s (%s); segue o anterior.", self.csv, erro)
                     else:
@@ -243,4 +259,4 @@ def carregar() -> Repositorio:
     return Fonte(caminho_csv()).repo()
 
 
-__all__ = ["Fonte", "Repositorio", "carregar", "caminho_csv", "ler_csv_modulo2", "Contato"]
+__all__ = ["Fonte", "Repositorio", "agrupar", "carregar", "caminho_csv", "classificacoes", "ler_csv_modulo2", "Contato"]

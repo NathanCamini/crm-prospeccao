@@ -34,7 +34,7 @@ def perfis(m3: Modulo3 = Depends(modulo3), conn: sqlite3.Connection = Depends(db
         # módulo 3 fora do ar: os perfis que já existem na cópia local
         todos = [{"id": r[0], "nome": r[0], "produto": None, "total_alvos": r[1]} for r in conn.execute(
             "SELECT perfil_id, SUM(e_alvo) FROM lead WHERE origem = 'modulo3' AND perfil_id IS NOT NULL GROUP BY perfil_id")]
-    return [p for p in todos if not ctx.perfis or p["id"] in ctx.perfis]
+    return [p for p in todos if ctx.ve_perfil(p["id"])]
 
 
 # ------------------------------------------------------------------ agente (via módulo 3)

@@ -88,7 +88,7 @@ def carregar_lead(conn: sqlite3.Connection, ctx: Contexto, chave: str, cfg: Conf
         if linha["empresa_id"] != ctx.empresa_id:
             raise HTTPException(404, "Lead não encontrado.")
         return linha
-    if ctx.perfis and linha["perfil_id"] not in ctx.perfis:
+    if linha["origem"] == "modulo3" and not ctx.ve_perfil(linha["perfil_id"]):
         raise HTTPException(404, "Lead não encontrado.")
     if (linha["ausente_desde"] or not linha["e_alvo"]) and _estado(conn, ctx, chave) is None:
         raise HTTPException(404, "Lead não encontrado.")
@@ -167,11 +167,7 @@ def mudar_estagio(request: Request, conn: sqlite3.Connection, ctx: Contexto, cha
 
 def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, dict]:
     p: dict = {"emp": ctx.empresa_id, "eu": ctx.nome}
-    perfis = ""
-    if ctx.perfis:
-        nomes = [f":perfil{i}" for i in range(len(ctx.perfis))]
-        p |= {f"perfil{i}": v for i, v in enumerate(ctx.perfis)}
-        perfis = f" AND l.perfil_id IN ({', '.join(nomes)})"
+    perfis = ctx.filtro_perfis("l.perfil_id", p)
     conds = [
         f"""((l.origem = 'modulo3'{perfis} AND ((l.e_alvo = 1 AND l.ausente_desde IS NULL) OR e.chave IS NOT NULL))
             OR (l.origem = 'manual' AND l.empresa_id = :emp))"""

@@ -73,7 +73,10 @@ class Lead(BaseModel):
     cep: str | None = None
     contato_receita: ContatoReceita = ContatoReceita()
     contatos: list[Contato] = []
-    classificacao: Classificacao
+    classificacao: Classificacao          # a melhor (alvo primeiro, depois maior score)
+    # Todas as classificações do CNPJ, uma por perfil: o mesmo CNPJ pode ser alvo do produto de duas empresas
+    # clientes, e cada uma vê só a dos perfis dela. Vazia = só `classificacao`.
+    classificacoes: list[Classificacao] = []
     canal_sugerido: Canal | None = None
     mes_referencia: str | None = None
 

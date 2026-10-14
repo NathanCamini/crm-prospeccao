@@ -22,7 +22,7 @@ MIGRACOES: list[str] = [
         id INTEGER PRIMARY KEY,
         nome TEXT NOT NULL UNIQUE,
         documento TEXT,
-        perfis TEXT NOT NULL DEFAULT '[]',          -- JSON; vazio = todos os perfis
+        perfis TEXT NOT NULL DEFAULT '[]',          -- JSON; vazio = todos os perfis (menos os produtos de outras empresas)
         ativa INTEGER NOT NULL DEFAULT 1,
         criada_em TEXT NOT NULL
     );
@@ -208,6 +208,21 @@ MIGRACOES: list[str] = [
         BEGIN SELECT RAISE(ABORT, 'a auditoria só aceita inclusão'); END;
     CREATE TRIGGER auditoria_sem_remocao BEFORE DELETE ON auditoria
         BEGIN SELECT RAISE(ABORT, 'a auditoria só aceita inclusão'); END;
+    """,
+    # v3 — produtos que cada empresa cliente descreve; o agente transforma cada um num perfil de leads.
+    """
+    CREATE TABLE produto (
+        perfil_id TEXT PRIMARY KEY,                 -- id do perfil no agente (módulo 2)
+        empresa_id INTEGER NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+        nome TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        versao INTEGER NOT NULL DEFAULT 1,
+        criado_por TEXT NOT NULL,
+        criado_em TEXT NOT NULL,
+        atualizado_em TEXT NOT NULL,
+        removido_em TEXT                            -- os leads já trabalhados continuam visíveis
+    );
+    CREATE INDEX produto_empresa ON produto(empresa_id);
     """,
 ]
 
