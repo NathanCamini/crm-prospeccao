@@ -60,6 +60,7 @@ Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exporta
 | `agente avaliar --perfil P --rotulos rotulos.csv` | Precisão e cobertura; sai com código 1 abaixo da meta |
 | `agente revisao-mensal --mes M --perfil P --saida revisao.csv` | 20 classificações aleatórias para conferir |
 | `agente custos [--mes M]` | Tokens e custo estimado por mês e perfil |
+| `agente rotina [--mes M] [--aguardar] [--repetir-horas N]` | Rotina do mês: classifica o mês mais novo do módulo 1 em todos os perfis e grava o CSV quando tudo termina |
 | `agente servir [--porta 9000]` | Responde às perguntas do CRM em `POST /perguntar` (o módulo 3 chama, via `AGENTE_URL`) |
 | `agente perguntar "texto" [--contexto lead.json]` | A mesma pergunta pelo terminal, para testar chave e modelo |
 
@@ -73,14 +74,23 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 2. `amostrar-rotulos --n 200`: uma pessoa preenche `e_alvo_humano` (sim/não) e, quando souber, `e_franquia_humano`.
 3. `classificar` do mês inteiro e `avaliar --rotulos`. Para confiar no perfil, a precisão precisa ser de pelo menos 85%, com 20 ou mais empresas previstas como alvo.
 
-**Todo mês:**
+**Todo mês:** com `docker compose --profile agendador up -d` na raiz, a rotina roda sozinha:
 
-1. O módulo 1 publica `exportacoes/novas/AAAA-MM/` no fim da carga (ou com `prospeccao exportar-novas`).
-2. `validar --mes AAAA-MM`.
-3. `classificar --mes AAAA-MM --perfil P --aguardar`, um perfil por vez.
-4. `exportar-crm`. O módulo 3 relê o CSV, busca os contatos das empresas-alvo e o CRM copia os leads na sincronização seguinte (ou na hora, em **Clientes**).
-5. `revisao-mensal`: 20 classificações conferidas por uma pessoa.
-6. `custos`.
+1. O módulo 1 publica `exportacoes/novas/AAAA-MM/` no fim da carga (`etl-agendador`).
+2. `agente rotina` (serviço `agente-rotina`, a cada `AGENTE_ROTINA_HORAS`):
+   - confere o arquivo do mês contra o contrato;
+   - envia o lote de cada perfil, ou recolhe o que terminou e envia a revisão;
+   - quando nenhum perfil tem lote em andamento e há classificação nova, grava o `classificacao.csv`.
+3. O módulo 3 relê o CSV e busca os contatos; o CRM copia os leads na sincronização seguinte.
+
+Um perfil com erro (funil acima de `limite_candidatos`, perfil inválido) fica de fora com o motivo no log, e os outros seguem.
+
+Sem o agendador, rode `agente rotina` à mão quantas vezes quiser (`--aguardar` espera os lotes) ou faça os passos separados: `validar`, `classificar` de cada perfil e `exportar-crm`.
+
+Continuam com a equipe:
+
+- `revisao-mensal`: 20 classificações conferidas por uma pessoa;
+- `custos`.
 
 ## Perguntas do CRM
 
@@ -222,7 +232,7 @@ Nada é inferido sobre religião, saúde ou origem. O prompt trata os campos da 
 ## Testes
 
 ```bash
-cd agente && pytest                                       # 78 testes, com LLM falso (não gasta API)
+cd agente && pytest                                       # 85 testes, com LLM falso (não gasta API)
 docker compose --profile testes run --rm testes-agente   # o mesmo, no contêiner
 ```
 
@@ -245,3 +255,4 @@ Numeração contínua com o README da raiz.
 | D61 | Minimização de dados pessoais no que vai ao LLM (sem CNPJ, telefone e e-mail; CPF mascarado; sem razão social de MEI). | LGPD: o modelo recebe só o necessário para classificar. |
 | D62 | Banco próprio do agente (`agente.sqlite`), chave CNPJ × perfil × versão; reclassifica só se mudarem os dados enviados ou o prompt. | Cada módulo tem o próprio estado (como o `crm.sqlite`); rodar o mesmo mês de novo não gasta nada. |
 | D63 | O agente entrega ao módulo 3 um CSV (`exportar-crm`), gravado de uma vez, na pasta que o módulo 3 já lê. | É o formato que o módulo 3 simulado aceita (`MODULO2_CSV`); a cadeia segue elo a elo e o CRM não muda. O sinal por site saiu, porque o site vem do módulo 3, que roda depois do agente. |
+| D69 | `agente rotina`: classificação em lote de todos os perfis e exportação só quando nenhum lote está em andamento e há classificação nova (contagem e data da última gravada). | Roda a cada poucas horas sem gastar nada quando não há novidade, e o módulo 3 nunca recebe um CSV com metade dos perfis atualizados. |

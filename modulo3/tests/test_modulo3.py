@@ -85,3 +85,14 @@ def test_csv_do_modulo2(tmp_path: Path):
     assert leads[0].classificacao.e_alvo and not leads[1].classificacao.e_alvo
     assert leads[0].contato_receita.email == "contato@hotelteste.test"
     assert leads[0].canal_sugerido == "email"
+
+
+def test_perguntar_repassa_o_motivo_do_agente(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("AGENTE_URL", "http://agente:9000/perguntar")
+    resposta = httpx.Response(503, json={"detail": "GEMINI_API_KEY não configurada"},
+                              request=httpx.Request("POST", "http://agente:9000/perguntar"))
+    monkeypatch.setattr("modulo3.main.httpx.post", lambda *a, **k: resposta)
+    r = _cliente().post("/v1/perguntar", json={"pergunta": "oi"})
+    assert r.status_code == 502 and "GEMINI_API_KEY" in r.json()["detail"]

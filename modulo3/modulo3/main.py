@@ -48,6 +48,13 @@ def _resposta_simulada(repo: Repositorio, lead: Lead | None) -> str:
     )
 
 
+def _detalhe(resp: httpx.Response) -> str:
+    try:
+        return str(resp.json().get("detail") or resp.status_code)
+    except ValueError:
+        return str(resp.status_code)
+
+
 def _ligado(nome: str, padrao: bool = True) -> bool:
     valor = os.environ.get(nome)
     return padrao if valor is None else valor.strip().lower() in {"1", "true", "sim", "yes"}
@@ -130,6 +137,9 @@ def criar_app(repo: Repositorio | None = None, fonte: Fonte | None = None, enriq
             )
             resp.raise_for_status()
             return Resposta(resposta=str(resp.json()["resposta"]), fonte="modulo2")
+        except httpx.HTTPStatusError as erro:  # o agente explica o motivo (ex.: sem chave do Gemini)
+            log.warning("O agente recusou a pergunta: %s", erro)
+            raise HTTPException(502, f"O agente do módulo 2 não respondeu: {_detalhe(erro.response)}") from erro
         except (httpx.HTTPError, KeyError, ValueError) as erro:
             log.warning("Falha ao consultar o agente: %s", erro)
             raise HTTPException(502, "O agente do módulo 2 não respondeu. Tente de novo em instantes.") from erro

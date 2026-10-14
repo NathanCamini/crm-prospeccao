@@ -43,6 +43,45 @@ O login fica salvo por 30 dias se "Manter conectado" estiver marcado.
 
 Os dados do CRM ficam em `./dados/crm.sqlite`. Em Linux, se aparecer "Permission denied" em `./dados`, rode com `UID=$(id -u) GID=$(id -g) docker compose …`.
 
+### Rotina do mês, sem intervenção
+
+Com `GEMINI_API_KEY` e `MODULO2_CSV=/modulo2/classificacao.csv` no `.env`:
+
+```bash
+docker compose --profile agendador up -d
+```
+
+| Etapa | Serviço | O que faz |
+|---|---|---|
+| 1 | `etl-agendador` | verifica todo dia se a Receita publicou um mês novo; carrega e grava o arquivo do mês para o agente |
+| 2 | `agente-rotina` | a cada `AGENTE_ROTINA_HORAS` (6), classifica o mês mais novo em todos os perfis, em lote; quando tudo termina, grava o `classificacao.csv` |
+| 3 | `modulo3` | relê o CSV e busca os contatos das empresas-alvo |
+| 4 | `crm-api` | copia os leads a cada 30 minutos |
+
+Cada etapa só lê o que a anterior gravou, então qualquer uma pode parar e retomar depois sem perder nada.
+
+Ficam com a equipe:
+
+- a conferência mensal das classificações (`agente revisao-mensal`);
+- o acompanhamento de custos (`agente custos`).
+
+O terminal do módulo 1 também está aqui: `docker compose --profile etl run --rm etl carga` (ou `amostra`, `exportar-novas`, `usuario criar NOME`). A base fica em `MODULO1_DADOS` (padrão `./etl/data`).
+
+### HTTPS
+
+Para acessar pela internet, aponte um domínio para a máquina, libere as portas 80 e 443 e, no `.env`:
+
+```env
+CRM_DOMINIO=crm.suaempresa.com.br
+CRM_COOKIE_SECURE=true
+```
+
+```bash
+docker compose --profile https up -d
+```
+
+O Caddy emite e renova o certificado sozinho (Let's Encrypt) e repassa ao nginx. A porta 8080 continua só em `127.0.0.1`.
+
 ## Rodar sem Docker (desenvolvimento)
 
 Três terminais, Python 3.11+ e Node 20+:
@@ -206,16 +245,18 @@ Não há envio automático. Ele entra na fase seguinte, só para e-mail e com ap
 - Toda requisição que altera dados exige o cabeçalho `X-CRM: 1`, que outro site não consegue enviar.
 - Por padrão a porta só escuta em `127.0.0.1`.
 - Contêineres sem root; nginx com cabeçalhos de segurança e CSP.
-- O IP gravado na auditoria é o que o nginx viu; um `X-Forwarded-For` mandado pelo cliente é ignorado. Se puser outro proxy HTTPS na frente, ajuste `proxy_set_header X-Forwarded-For` em `frontend/nginx.conf`.
+- O IP gravado na auditoria é o que o nginx viu; um `X-Forwarded-For` mandado pelo cliente é ignorado.
+- Atrás do Caddy (perfil `https`), o nginx aceita o IP do cliente só vindo do endereço fixo do Caddy na rede `borda`. Quem acessa direto a 8080 continua com o IP da conexão.
+- Se puser outro proxy na frente, troque `set_real_ip_from` em `frontend/nginx.conf` pelo endereço dele.
 
 ## Testes
 
 ```bash
 cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento entre empresas, estágios, contato, supressão, agente,
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
-cd modulo3 && pytest        # 14 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos
+cd modulo3 && pytest        # 15 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos
 cd etl && pytest            # 192 testes do módulo 1: carga, arquivo do mês para o agente, consultas, contatos, exportação, interface
-cd agente && pytest         # 78 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas
+cd agente && pytest         # 85 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas, rotina
 cd frontend && npm run build  # checagem de tipos + build
 ```
 
@@ -224,6 +265,7 @@ cd frontend && npm run build  # checagem de tipos + build
 ```
 backend/        API do CRM (FastAPI + SQLite)
 frontend/       interface (React + TypeScript + Vite), servida por nginx
+deploy/         Caddyfile do HTTPS (perfil "https")
 etl/            módulo 1: carga dos Dados Abertos do CNPJ (DuckDB), interface Streamlit e agente do Colab — ver etl/README.md
 modulo3/        módulo 3: contatos complementares e entrega ao CRM (FastAPI); dados simulados sem o CSV
 agente/         módulo 2: agente classificador (perfis, contrato do mês, Gemini) — ver agente/README.md
@@ -261,3 +303,4 @@ modulo2_saida/  CSV que o agente grava e o módulo 3 lê
 | D66 | O módulo 3 real nasce do simulado e usa o serviço de contatos do módulo 1 (`prospeccao.enrich`), com banco próprio. | A busca de contatos já existia, testada, no módulo 1; o módulo 3 só a aplica às empresas-alvo do agente. O contrato v1 e o CRM não mudam. O pacote do módulo 1 entra sem as dependências pesadas (Streamlit, pandas), que o enriquecimento não usa. |
 | D67 | O módulo 3 relê o CSV do agente quando o arquivo muda, em vez de ler só ao subir. | A rotina do mês deixa de depender de reiniciar o contêiner; o agente já grava o CSV de uma vez (D63), então nunca se lê um arquivo pela metade. |
 | D68 | Perguntas respondidas pelo próprio agente (`agente servir`), com servidor HTTP da biblioteca padrão e o mesmo cliente Gemini da classificação. | Sem dependência nova no agente e sem outro serviço de LLM. A minimização de dados da D61 vale também para as perguntas. O serviço fica num perfil do compose: sem chave do Gemini, o CRM continua no modo simulado em vez de dar erro. |
+| D70 | HTTPS pelo Caddy, num perfil do compose; o nginx confia no `X-Forwarded-For` só vindo do endereço fixo do Caddy. | Certificado automático sem configuração. Confiar na faixa inteira deixaria forjar o IP da auditoria pela porta 8080, que chega pelo gateway da mesma rede. |

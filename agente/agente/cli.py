@@ -10,6 +10,7 @@
     agente revisao-mensal --mes 2026-10 --perfil amenities_hotel --saida revisao.csv
     agente custos [--mes 2026-10]
     agente exportar-crm [--perfil amenities_hotel] [--mes 2026-10]
+    agente rotina [--aguardar] [--repetir-horas 6]  mês novo do módulo 1 → classifica todos os perfis → CSV
     agente servir [--porta 9000]                 perguntas do CRM (POST /perguntar), via módulo 3
     agente perguntar "texto" [--contexto lead.json]
 """
@@ -94,6 +95,12 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     ex.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos os classificados")
     ex.add_argument("--mes", help="Só este mês. Padrão: todos os meses classificados")
     ex.add_argument("--saida", type=Path, help=f"Padrão: AGENTE_SAIDA_DIR/{ARQUIVO_CRM}")
+
+    ro = sub.add_parser("rotina", help="Rotina do mês: classifica o mês mais novo em todos os perfis e exporta o CSV")
+    ro.add_argument("--mes", help="Mês AAAA-MM (padrão: o mais recente publicado pelo módulo 1)")
+    ro.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos")
+    ro.add_argument("--aguardar", action="store_true", help="Espera os lotes terminarem (até 26 h por perfil)")
+    ro.add_argument("--repetir-horas", type=float, help="Fica rodando e repete a cada N horas (para o agendador)")
 
     sv = sub.add_parser("servir", help="Responde às perguntas do CRM em POST /perguntar (o módulo 3 chama, AGENTE_URL)")
     sv.add_argument("--endereco", default="0.0.0.0")
@@ -193,6 +200,19 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
         if args.comando == "custos":
             _tabela(banco().custos(args.mes))
             return 0
+        if args.comando == "rotina":
+            from agente.rotina import executar_rotina, repetir
+
+            store = banco()
+            classificador = _classificador(cfg, store, fabrica_cliente)
+            passo = lambda: executar_rotina(cfg, store, classificador, args.mes, args.perfil,  # noqa: E731
+                                            aguardar=args.aguardar)
+            if args.repetir_horas:
+                repetir(passo, args.repetir_horas)
+                return 0
+            resumo = passo()
+            print("\n".join(resumo.linhas()))
+            return 2 if resumo.erro else 0
         if args.comando == "servir":
             from agente.perguntas import servir
 
