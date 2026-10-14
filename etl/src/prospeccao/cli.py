@@ -1,4 +1,5 @@
-"""Linha de comando: carga, meses, amostra, benchmark, usuario, exportar, exportar-parquet(-amostra), agendador e web."""
+"""Linha de comando: carga, meses, amostra, benchmark, usuario, exportar, exportar-novas, exportar-parquet(-amostra),
+agendador e web."""
 
 from __future__ import annotations
 
@@ -65,6 +66,12 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     e.add_argument("--saida", type=Path, help="Arquivo de saída (padrão: data/exportacoes/<consulta>_<data>.<formato>)")
     e.add_argument("--separador", default=";", help="Separador do CSV (padrão ';')")
     e.add_argument("--top", type=int, default=50, help="Empresas na tabela do PDF")
+
+    n = sub.add_parser("exportar-novas",
+                       help="Grava o arquivo mensal de empresas novas para o agente classificador (módulo 2)")
+    n.add_argument("--mes", help="Mês AAAA-MM (padrão: o da base carregada; precisa ser o mesmo)")
+    n.add_argument("--desde", type=date.fromisoformat,
+                   help="Usa as aberturas a partir desta data em vez de comparar com o mês anterior")
 
     x = sub.add_parser("exportar-parquet",
                        help="Grava os estabelecimentos ativos num único Parquet (ex.: para o agente no Colab)")
@@ -182,6 +189,12 @@ def main(argv: list[str] | None = None) -> int:
             return _web(args.porta, args.endereco)
         if args.comando == "exportar":
             return _exportar(cfg, args)
+        if args.comando == "exportar-novas":
+            from prospeccao.transform.novas import exportar_novas
+
+            r = exportar_novas(cfg, args.mes, args.desde)
+            print(f"{r['total_linhas']} empresas novas de {r['mes']} ({r['criterio']}) em {r['pasta']}")
+            return 0
         if args.comando == "exportar-parquet":
             return _exportar_parquet(cfg, args.saida)
         if args.comando == "exportar-parquet-amostra":

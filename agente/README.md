@@ -72,7 +72,7 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 
 **Todo mês:**
 
-1. O módulo 1 publica `exportacoes/novas/AAAA-MM/`.
+1. O módulo 1 publica `exportacoes/novas/AAAA-MM/` no fim da carga (ou com `prospeccao exportar-novas`).
 2. `validar --mes AAAA-MM`.
 3. `classificar --mes AAAA-MM --perfil P --aguardar`, um perfil por vez.
 4. `exportar-crm` e `docker compose restart modulo3`. O CRM copia os leads na sincronização seguinte (ou na hora, em **Clientes**).
@@ -207,7 +207,6 @@ docker compose --profile testes run --rm testes-agente   # o mesmo, no contêine
 
 ## Pontos em aberto
 
-- **O módulo 1 ainda não gera a entrada do agente:** o `etl/` tem o `exportar-parquet` (todos os ativos, para o Colab), mas não o arquivo mensal `exportacoes/novas/AAAA-MM/` no formato de `schema/empresas_novas.v1.json`. Até existir, o agente não tem o que classificar.
 - **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. Faça o teste online com `--amostra` e um lote pequeno antes do mês inteiro.
 - **Capital mínimo no perfil de exemplo:** na base real de 2026-09, todas as 27 empresas com sinal de rede (Atlantica, Accor) têm capital de R$ 4.600 a R$ 50.000. Com `capital_social_min: 100000`, hotéis de bandeira ficam fora do funil. Revise se eles interessam.
 - **Franquia ou unidade própria:** sócio holding e e-mail da rede mostram que a unidade é da rede, mas não distinguem franquia de unidade própria. O modelo decide com os dados, e a rotulagem mede o acerto.

@@ -30,6 +30,7 @@ class Config:
     meses_mantidos: int = 0  # 0 = não apaga meses antigos de bronze/silver
     trabalho_dir_env: Path | None = None  # pasta de arquivos temporários (padrão: data/tmp)
     bronze_processos: int = 0  # 0 = automático (núcleos disponíveis, até 8)
+    exportar_novas: bool = True  # ao fim da carga, grava o arquivo do mês para o agente (módulo 2)
     sessao_horas: float = 12.0  # 0 = pede senha a cada recarga da página
     # Busca complementar de contatos
     cache_busca_dias: int = 90
@@ -95,6 +96,7 @@ def carregar_config(data_dir: Path | None = None) -> Config:
         meses_mantidos=int(os.getenv("MESES_MANTIDOS", "2")),
         trabalho_dir_env=Path(os.environ["PROSPECCAO_TRABALHO_DIR"]).resolve() if os.getenv("PROSPECCAO_TRABALHO_DIR") else None,
         bronze_processos=int(os.getenv("BRONZE_PROCESSOS", "0")),
+        exportar_novas=_bool(os.getenv("EXPORTAR_NOVAS"), True),
         sessao_horas=float(os.getenv("SESSAO_HORAS", "12")),
         cache_busca_dias=int(os.getenv("CACHE_BUSCA_DIAS", "90")),
         site_intervalo_segundos=float(os.getenv("SITE_INTERVALO_SEGUNDOS", "2")),

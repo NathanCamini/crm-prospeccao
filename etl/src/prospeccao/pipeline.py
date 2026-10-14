@@ -18,6 +18,7 @@ from prospeccao.ingest.bronze import apagar_csvs_extraidos, csvs_por_tabela, pre
 from prospeccao.ingest.download import ClienteReceita, baixar_mes
 from prospeccao.monitor import medir
 from prospeccao.transform.gold import configurar_duckdb, gerar_gold, publicar_gold, registrar_metricas
+from prospeccao.transform.novas import exportar_novas
 from prospeccao.transform.silver import gerar_silver
 
 log = logging.getLogger("prospeccao.pipeline")
@@ -199,11 +200,25 @@ def _executar_carga(cfg: Config, mes: str | None, baixar: bool, data_referencia:
     publicar_gold(tmp_db, cfg.gold_db)
     if cfg.apagar_csv_extraido:
         apagar_csvs_extraidos(cfg, mes)
+    novas = _exportar_novas(cfg, mes)  # antes da limpeza: compara com a silver do mês anterior
     if cfg.meses_mantidos > 0:
         limpar_meses_antigos(cfg, cfg.meses_mantidos)
 
     log.info("Carga %s concluída", mes)
-    return {"mes_referencia": mes, "gold_db": str(cfg.gold_db), "contagens": contagens, "metricas": metricas}
+    return {"mes_referencia": mes, "gold_db": str(cfg.gold_db), "contagens": contagens, "metricas": metricas,
+            "empresas_novas": novas}
+
+
+def _exportar_novas(cfg: Config, mes: str) -> dict | None:
+    """Arquivo do mês para o agente (módulo 2). Uma falha aqui não desfaz a carga: fica no log e no resumo."""
+    if not cfg.exportar_novas:
+        return None
+    try:
+        r = exportar_novas(cfg, mes)
+    except Exception as exc:  # noqa: BLE001 — a base já foi publicada; dá para rodar `prospeccao exportar-novas` depois
+        log.exception("Falha ao exportar as empresas novas de %s", mes)
+        return {"erro": str(exc)}
+    return {"total": r["total_linhas"], "criterio": r["criterio"], "pasta": r["pasta"]}
 
 
 def carregar_se_houver_novo(cfg: Config, cliente: ClienteReceita | None = None) -> dict | None:

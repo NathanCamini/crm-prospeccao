@@ -215,6 +215,14 @@ Formato: data · decisão · motivo. Decisões da seção 0 do escopo não são 
 
 O agente saiu deste módulo e virou o módulo 2, em `agente/` na raiz do repositório. As decisões dele estão em `agente/README.md` (D57 a D63).
 
+## 2026-10-14 · Arquivo mensal para o agente
+
+### D65. `exportar-novas`: comparação com a silver do mês anterior
+- O contrato `empresas_novas.v1` define empresa nova como quem aparece na carga do mês e não aparecia na anterior. A gold do mês anterior já foi substituída, então a comparação é com a silver do mês anterior (só os CNPJs), que a limpeza mantém com `MESES_MANTIDOS` ≥ 2.
+- Sem o mês anterior (primeira carga ou limpeza agressiva), cai para a data de abertura a partir do dia 1 do mês anterior, e o critério vai no manifesto. Data de abertura no futuro fica fora, como na `is_nova`.
+- `contato_compartilhado` conta os CNPJs da base inteira, mas só para os contatos que aparecem nas novas; assim não varre 70 milhões de contatos à toa. Telefone é comparado só com os dígitos; o arquivo leva o contato original.
+- Roda no fim da carga, antes da limpeza de meses antigos. Se falhar, a base continua publicada e o erro vai para o resumo.
+
 ## Pontos em aberto da seção 12 (opção mais simples)
 
 | # | Ponto | Escolha |

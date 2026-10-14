@@ -60,6 +60,7 @@ Detalhes:
 | `prospeccao usuario criar\|senha\|remover\|listar [NOME]` | Usuários da interface |
 | `prospeccao web [--endereco 127.0.0.1] [--porta 8501]` | Interface (Streamlit) |
 | `prospeccao exportar --consulta NOME --formato csv\|xlsx\|pdf [--saida ARQ]` | Exporta uma consulta salva |
+| `prospeccao exportar-novas [--mes AAAA-MM] [--desde AAAA-MM-DD]` | Grava o arquivo mensal de empresas novas para o agente classificador (a carga já faz isso sozinha) |
 | `prospeccao exportar-parquet [--saida ARQ]` | Grava os estabelecimentos ativos num único Parquet (para o agente no Colab) |
 | `prospeccao exportar-parquet-amostra [--linhas 10000] [--saida ARQ]` | Grava só uma amostra de ativos, variada em municípios e CNAEs (para enviar a uma IA com poucos tokens) |
 
@@ -145,7 +146,13 @@ O agente classificador fica em [`../agente`](../agente/README.md). Ele lê desta
 - o arquivo mensal `exportacoes/novas/AAAA-MM/empresas_novas.parquet` com o `_manifest.json`, no formato de `agente/schema/empresas_novas.v1.json`;
 - a tabela `socio` da gold (`gold/empresas.duckdb`), se existir, para o sinal de sócio holding de rede.
 
-**Pendente:** este módulo ainda não gera o arquivo mensal de empresas novas. O `exportar-parquet` acima é outro arquivo (todos os ativos, para o Colab).
+**O arquivo do mês sai no fim de cada carga** (`EXPORTAR_NOVAS=true`, padrão). Para gerar de novo: `prospeccao exportar-novas`.
+
+- **Empresa nova** é o estabelecimento que está na base do mês e não estava na silver do mês anterior. Por isso mantenha `MESES_MANTIDOS` em 2 ou mais.
+- Na primeira carga não há mês anterior: entram as aberturas a partir do dia 1 do mês anterior ao da carga (ou de `--desde`). O critério usado fica no manifesto.
+- Vão junto as três marcações que o agente usa como sinal: `contato_compartilhado` (o mesmo e-mail ou telefone em mais de 5 CNPJs da base, em geral a contabilidade), `filial_de_empresa_existente` e `pessoa_fisica_identificavel` (empresário individual, MEI ou natureza de pessoa física).
+- O Parquet é gravado num temporário e renomeado, e o manifesto vem por último com o SHA-256: o agente nunca lê um arquivo pela metade.
+- Uma falha nesta etapa não desfaz a carga: fica no log e no resumo (`empresas_novas.erro`).
 
 ## Contatos complementares
 
