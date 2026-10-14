@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
                   f"→ {saida}")
             for mes, n in r.puladas.items():
                 print(f"  atenção: {n} classificações de {mes} ficaram fora (arquivo do mês ausente ou alterado)")
-            print("O módulo 3 lê o CSV ao subir: docker compose restart modulo3")
+            print("O módulo 3 relê o CSV sozinho; o CRM copia os leads na próxima sincronização.")
             return 0
     except (ContratoInvalidoError, PerfilInvalidoError, FunilGrandeError, RuntimeError, ValueError) as exc:
         log.error("%s", exc)

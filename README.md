@@ -6,7 +6,7 @@ O CRM não processa a base. Ele guarda uma cópia dos leads que recebe do módul
 
 ```
 web (React + TS) ──► crm-api (FastAPI) ──► módulo 3 ──► módulo 2 (agente) ──► módulo 1 (ETL)
-                       │                    (aqui simulado)
+                       │                    (contatos)
                        └─ crm.sqlite: cópia dos leads, empresas clientes, pessoas, estágios, histórico,
                                       próximos passos, vendas, modelos, não contatar, auditoria
 ```
@@ -37,6 +37,8 @@ O login fica salvo por 30 dias se "Manter conectado" estiver marcado.
 | `docker compose run --rm crm-api python -m crm auditoria verificar` | conferir se algum registro da auditoria foi alterado ou apagado direto no arquivo |
 | `docker compose --profile testes run --rm testes` | testes da API |
 | `docker compose --profile testes run --rm testes-agente` | testes do agente (módulo 2) |
+| `docker compose --profile testes run --rm testes-modulo3` | testes do módulo 3 |
+| `docker compose exec modulo3 python -m modulo3 enriquecer` | buscar agora os contatos das empresas-alvo |
 | `docker compose logs -f crm-api` | acompanhar a API |
 
 Os dados do CRM ficam em `./dados/crm.sqlite`. Em Linux, se aparecer "Permission denied" em `./dados`, rode com `UID=$(id -u) GID=$(id -g) docker compose …`.
@@ -46,8 +48,8 @@ Os dados do CRM ficam em `./dados/crm.sqlite`. Em Linux, se aparecer "Permission
 Três terminais, Python 3.11+ e Node 20+:
 
 ```bash
-# 1. módulo 3 simulado
-cd modulo3_stub && pip install -e ".[dev]" && uvicorn modulo3.main:app --port 8100
+# 1. módulo 3 (sem MODULO2_CSV, com os dados simulados)
+cd modulo3 && pip install --no-deps -e ../etl && pip install -e ".[dev]" && uvicorn modulo3.main:app --port 8100
 
 # 2. API do CRM
 cd backend && pip install -e ".[dev]"
@@ -112,7 +114,7 @@ A tela **Auditoria** filtra por período, pessoa, tipo de ação e resultado, mo
 
 ## Dados simulados
 
-Enquanto o módulo 3 real não existe, `modulo3_stub` faz o papel dele com 44 empresas fictícias de hotelaria e restaurantes no RS e em SC (39 classificadas como alvo), já com classificação, contatos complementares e alguns casos difíceis (unidade de rede, filial, e-mail de contabilidade).
+Sem `MODULO2_CSV`, o módulo 3 serve 44 empresas fictícias de hotelaria e restaurantes no RS e em SC (39 classificadas como alvo), já com classificação, contatos complementares e alguns casos difíceis (unidade de rede, filial, e-mail de contabilidade).
 
 Para não mandar mensagem a ninguém por engano:
 
@@ -123,11 +125,10 @@ Para não mandar mensagem a ninguém por engano:
 
 O agente fica em [`agente/`](agente/README.md). Dá para usar a saída dele antes de existir o módulo 3 real.
 
-**Leads vindos do CSV do agente.** Com o mês classificado, o agente grava `classificacao.csv` em `MODULO2_PASTA` (a mesma pasta que o módulo 3 lê). Defina o arquivo no `.env` e reinicie o módulo 3, que lê o CSV ao subir:
+**Leads vindos do CSV do agente.** Com o mês classificado, o agente grava `classificacao.csv` em `MODULO2_PASTA` (a mesma pasta que o módulo 3 lê). Defina o arquivo no `.env` uma vez; daí em diante o módulo 3 relê o CSV sozinho sempre que o agente grava um novo:
 
 ```bash
 docker compose run --rm agente exportar-crm
-docker compose restart modulo3
 ```
 
 ```env
@@ -152,19 +153,32 @@ AGENTE_URL=http://host.docker.internal:9000/perguntar
 
 `contexto` vem preenchido quando a pergunta é feita na ficha de uma empresa. A resposta fica no histórico dela.
 
-## Trocar o simulado pelo módulo 3 real
+## Módulo 3: contatos complementares
 
-O módulo 3 real precisa responder aos mesmos cinco endpoints, no formato de `contrato/lead.v1.json`:
+O módulo 3 ([`modulo3/`](modulo3)) fica entre o agente e o CRM. Com `MODULO2_CSV`, ele:
+
+1. lê o `classificacao.csv` do agente, e de novo sempre que o arquivo muda;
+2. busca em segundo plano os contatos das empresas-alvo (a cada `MODULO3_ENRIQUECER_MINUTOS`, até `MODULO3_LOTE` empresas por vez);
+3. entrega cada lead ao CRM com os contatos encontrados, cada um com fonte, endereço e confiança.
+
+A busca é a mesma do módulo 1 (`etl/src/prospeccao/enrich`), sem cópia de código:
+
+- lê o site do domínio do e-mail da Receita (não vale para gmail, hotmail e similares), respeitando o robots.txt e um intervalo mínimo por site;
+- link de WhatsApp no site vira contato `whatsapp`;
+- com `BUSCA_API_PROVEDOR=brave`, quem não tem site próprio no e-mail passa pela API, que só indica o site provável. Se a confiança não for baixa, o módulo 3 lê esse site;
+- nunca raspa o Google nem redes sociais;
+- uma empresa já buscada só volta à fila depois de `CACHE_BUSCA_DIAS`;
+- o contato original da Receita nunca é alterado e não é repetido como complementar.
+
+Os contatos ficam no volume `modulo3_dados` (`modulo3.sqlite`). O `GET /saude` mostra quantas empresas já têm contato e o resumo do último ciclo.
 
 | Endpoint | Retorno |
 |---|---|
-| `GET /saude` | `{"fonte": "modulo2" \| "simulado", "mes_referencia", ...}` |
+| `GET /saude` | `{"fonte": "modulo2" \| "simulado", "mes_referencia", "enriquecimento", ...}` |
 | `GET /v1/perfis` | lista de perfis com total de alvos |
 | `POST /v1/leads/busca` | página de leads; aceita `cnpjs`, `excluir_cnpjs` e `apenas_cnpjs` (o CRM usa para filtrar por estágio) |
 | `GET /v1/leads/{cnpj}` | um lead |
 | `POST /v1/perguntar` | repassa ao agente |
-
-Depois é só trocar o serviço `modulo3` no `docker-compose.yml`. O CRM não muda.
 
 ## O que o CRM faz
 
@@ -195,7 +209,7 @@ Não há envio automático. Ele entra na fase seguinte, só para e-mail e com ap
 ```bash
 cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento entre empresas, estágios, contato, supressão, agente,
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
-cd modulo3_stub && pytest   # 8 testes: dados fictícios, busca, CSV do agente
+cd modulo3 && pytest        # 14 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos
 cd etl && pytest            # 192 testes do módulo 1: carga, arquivo do mês para o agente, consultas, contatos, exportação, interface
 cd agente && pytest         # 64 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM
 cd frontend && npm run build  # checagem de tipos + build
@@ -207,7 +221,7 @@ cd frontend && npm run build  # checagem de tipos + build
 backend/        API do CRM (FastAPI + SQLite)
 frontend/       interface (React + TypeScript + Vite), servida por nginx
 etl/            módulo 1: carga dos Dados Abertos do CNPJ (DuckDB), interface Streamlit e agente do Colab — ver etl/README.md
-modulo3_stub/   módulo 3 simulado (FastAPI)
+modulo3/        módulo 3: contatos complementares e entrega ao CRM (FastAPI); dados simulados sem o CSV
 agente/         módulo 2: agente classificador (perfis, contrato do mês, Gemini) — ver agente/README.md
 contrato/       contrato v1 entre módulo 3 e CRM (JSON Schema)
 dados/          banco do CRM (montado no contêiner)
@@ -240,3 +254,5 @@ modulo2_saida/  CSV que o agente grava e o módulo 3 lê
 | D54 | A auditoria é gravada por um middleware, depois da resposta, em transação separada. | Toda requisição gera registro, inclusive as negadas e as que dão erro, e uma falha na auditoria não perde a ação do usuário (o erro vai para o log do servidor). |
 | D55 | Cliques que não passam pelo servidor são enviados de uma lista fechada de eventos. | Registra "copiou a mensagem" ou "abriu o WhatsApp" sem deixar a tela gravar qualquer texto na auditoria. |
 | D56 | Datas de agenda e relatórios no fuso `America/Sao_Paulo` (`CRM_FUSO`); horários gravados em UTC. | "Hoje" e "semana" precisam bater com o relógio da equipe; UTC no banco evita ambiguidade. |
+| D66 | O módulo 3 real nasce do simulado e usa o serviço de contatos do módulo 1 (`prospeccao.enrich`), com banco próprio. | A busca de contatos já existia, testada, no módulo 1; o módulo 3 só a aplica às empresas-alvo do agente. O contrato v1 e o CRM não mudam. O pacote do módulo 1 entra sem as dependências pesadas (Streamlit, pandas), que o enriquecimento não usa. |
+| D67 | O módulo 3 relê o CSV do agente quando o arquivo muda, em vez de ler só ao subir. | A rotina do mês deixa de depender de reiniciar o contêiner; o agente já grava o CSV de uma vez (D63), então nunca se lê um arquivo pela metade. |

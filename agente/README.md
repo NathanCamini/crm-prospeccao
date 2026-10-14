@@ -22,8 +22,7 @@ docker compose build agente
 docker compose run --rm agente validar --mes 2026-09
 docker compose run --rm agente classificar --mes 2026-09 --perfil amenities_hotel --modo online --amostra 10
 docker compose run --rm agente classificar --mes 2026-09 --perfil amenities_hotel
-docker compose run --rm agente exportar-crm
-docker compose restart modulo3
+docker compose run --rm agente exportar-crm      # o módulo 3 relê o CSV sozinho
 ```
 
 | Pasta | O que é | No contêiner |
@@ -75,7 +74,7 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 1. O módulo 1 publica `exportacoes/novas/AAAA-MM/` no fim da carga (ou com `prospeccao exportar-novas`).
 2. `validar --mes AAAA-MM`.
 3. `classificar --mes AAAA-MM --perfil P --aguardar`, um perfil por vez.
-4. `exportar-crm` e `docker compose restart modulo3`. O CRM copia os leads na sincronização seguinte (ou na hora, em **Clientes**).
+4. `exportar-crm`. O módulo 3 relê o CSV, busca os contatos das empresas-alvo e o CRM copia os leads na sincronização seguinte (ou na hora, em **Clientes**).
 5. `revisao-mensal`: 20 classificações conferidas por uma pessoa.
 6. `custos`.
 

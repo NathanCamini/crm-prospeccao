@@ -1,4 +1,7 @@
-"""Módulo 3 simulado: API HTTP no contrato v1.
+"""Módulo 3: entrega ao CRM os leads do agente (módulo 2) com contatos complementares, no contrato v1.
+
+Sem `MODULO2_CSV`, serve os dados fictícios de `seed.py` (fonte "simulado").
+Com o CSV, busca em segundo plano os contatos das empresas-alvo (ver enriquecimento.py).
 
 Endpoints:
   GET  /saude
@@ -12,11 +15,14 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException
 
-from .dados import Repositorio, carregar
+from .dados import Fonte, Repositorio, caminho_csv
 from .modelos import VERSAO_CONTRATO, Filtro, Lead, Pagina, Perfil, Pergunta, Resposta
 
 log = logging.getLogger("modulo3")
@@ -42,15 +48,42 @@ def _resposta_simulada(repo: Repositorio, lead: Lead | None) -> str:
     )
 
 
-def criar_app(repo: Repositorio | None = None) -> FastAPI:
-    app = FastAPI(title="Módulo 3 – enriquecimento (simulado)", version=VERSAO_CONTRATO)
-    app.state.repo = repo or carregar()
+def _ligado(nome: str, padrao: bool = True) -> bool:
+    valor = os.environ.get(nome)
+    return padrao if valor is None else valor.strip().lower() in {"1", "true", "sim", "yes"}
+
+
+def criar_app(repo: Repositorio | None = None, fonte: Fonte | None = None, enriquecedor=None) -> FastAPI:
+    """`repo` fixo (testes) ou `fonte`; sem nenhum dos dois, lê o ambiente."""
+    if repo is None and fonte is None:
+        csv = caminho_csv()
+        if csv is not None and enriquecedor is None and _ligado("MODULO3_ENRIQUECER"):
+            from .enriquecimento import ConfigEnriquecimento, Enriquecedor
+
+            enriquecedor = Enriquecedor(ConfigEnriquecimento.do_ambiente())
+        fonte = Fonte(csv, enriquecedor.contatos if enriquecedor else None)
+    atual = (lambda: repo) if repo is not None else fonte.repo
+
+    @asynccontextmanager
+    async def ciclo(_: FastAPI) -> AsyncIterator[None]:
+        parar = threading.Event()
+        if enriquecedor is not None and enriquecedor.cfg.minutos > 0:
+            from .enriquecimento import enriquecer_periodicamente
+
+            threading.Thread(target=enriquecer_periodicamente, args=(enriquecedor, lambda: atual().leads, parar),
+                             name="enriquecimento", daemon=True).start()
+        yield
+        parar.set()
+
+    app = FastAPI(title="Módulo 3 – contatos e entrega ao CRM", version=VERSAO_CONTRATO, lifespan=ciclo)
+    app.state.atual = atual
+    app.state.enriquecedor = enriquecedor
     agente_url = os.environ.get("AGENTE_URL", "").strip()
     agente_timeout = float(os.environ.get("AGENTE_TIMEOUT_SEGUNDOS", "120"))
 
     @app.get("/saude")
     def saude() -> dict:
-        r: Repositorio = app.state.repo
+        r = atual()
         return {
             "ok": True,
             "contrato": VERSAO_CONTRATO,
@@ -58,26 +91,27 @@ def criar_app(repo: Repositorio | None = None) -> FastAPI:
             "mes_referencia": r.mes_referencia,
             "total": len(r.leads),
             "agente_conectado": bool(agente_url),
+            "enriquecimento": enriquecedor.resumo() if enriquecedor else {"ativo": False},
         }
 
     @app.get("/v1/perfis", response_model=list[Perfil])
     def perfis() -> list[Perfil]:
-        return app.state.repo.perfis()
+        return atual().perfis()
 
     @app.post("/v1/leads/busca", response_model=Pagina)
     def buscar(filtro: Filtro) -> Pagina:
-        return app.state.repo.buscar(filtro)
+        return atual().buscar(filtro)
 
     @app.get("/v1/leads/{cnpj}", response_model=Lead)
     def obter(cnpj: str) -> Lead:
-        lead = app.state.repo.obter(cnpj.upper())
+        lead = atual().obter(cnpj.upper())
         if not lead:
             raise HTTPException(404, "Empresa não encontrada no módulo 3.")
         return lead
 
     @app.post("/v1/perguntar", response_model=Resposta)
     def perguntar(p: Pergunta) -> Resposta:
-        r: Repositorio = app.state.repo
+        r = atual()
         lead = r.obter(p.cnpj.upper()) if p.cnpj else None
         if p.cnpj and not lead and p.contexto is None:
             raise HTTPException(404, "Empresa não encontrada no módulo 3.")

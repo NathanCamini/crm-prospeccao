@@ -1,4 +1,4 @@
-# CRM de prospecção (módulo 4) + módulo 3 simulado.
+# CRM de prospecção (módulo 4) + módulo 3 + agente (módulo 2, sob demanda).
 #
 #   docker compose up -d --build
 #   docker compose run --rm crm-api python -m crm superadmin criar seu-nome
@@ -8,15 +8,28 @@
 
 services:
   modulo3:
-    build: ./modulo3_stub
+    build:
+      context: ./modulo3
+      additional_contexts:
+        etl: ./etl                              # serviço de contatos do módulo 1 (prospeccao.enrich)
     image: prospeccao-modulo3:latest
     restart: unless-stopped
     environment:
       MODULO2_CSV: ${MODULO2_CSV:-}               # ex.: /modulo2/classificacao.csv (vazio = dados simulados)
-      AGENTE_URL: ${AGENTE_URL:-}                 # ex.: http://host.docker.internal:9000/perguntar
+      AGENTE_URL: ${AGENTE_URL:-}                 # ex.: http://agente-perguntas:9000/perguntar
       AGENTE_TIMEOUT_SEGUNDOS: ${AGENTE_TIMEOUT_SEGUNDOS:-120}
+      # Busca de contatos das empresas-alvo (só com MODULO2_CSV)
+      MODULO3_ENRIQUECER: ${MODULO3_ENRIQUECER:-true}
+      MODULO3_ENRIQUECER_MINUTOS: ${MODULO3_ENRIQUECER_MINUTOS:-60}
+      MODULO3_LOTE: ${MODULO3_LOTE:-100}
+      CACHE_BUSCA_DIAS: ${CACHE_BUSCA_DIAS:-90}
+      SITE_INTERVALO_SEGUNDOS: ${SITE_INTERVALO_SEGUNDOS:-2}
+      BUSCA_API_PROVEDOR: ${BUSCA_API_PROVEDOR:-nenhum}
+      BRAVE_SEARCH_CHAVE: ${BRAVE_SEARCH_CHAVE:-}
+      API_LIMITE_DIARIO: ${API_LIMITE_DIARIO:-100}
     volumes:
       - ${MODULO2_PASTA:-./modulo2_saida}:/modulo2:ro
+      - modulo3_dados:/dados                      # contatos encontrados e registro das buscas (modulo3.sqlite)
     extra_hosts:
       - "host.docker.internal:host-gateway"     # permite chegar ao agente rodando no seu computador
 
@@ -52,7 +65,7 @@ services:
 
   # Agente classificador (módulo 2). Roda sob demanda, não fica no ar:
   #   docker compose run --rm agente classificar --mes 2026-10 --perfil amenities_hotel
-  #   docker compose run --rm agente exportar-crm && docker compose restart modulo3
+  #   docker compose run --rm agente exportar-crm      (o módulo 3 relê o CSV sozinho)
   agente:
     profiles: ["agente"]
     build: ./agente
@@ -78,8 +91,20 @@ services:
     build: ./backend
     command: ["python", "-m", "pytest", "-q"]
 
+  testes-modulo3:
+    profiles: ["testes"]
+    image: prospeccao-modulo3:latest
+    build:
+      context: ./modulo3
+      additional_contexts:
+        etl: ./etl
+    entrypoint: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
   testes-agente:
     profiles: ["testes"]
     image: prospeccao-agente:latest
     build: ./agente
     entrypoint: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+volumes:
+  modulo3_dados:

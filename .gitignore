@@ -8,3 +8,4 @@ modulo2_saida/*
 **/*.egg-info/
 frontend/node_modules/
 frontend/dist/
+**/build/
