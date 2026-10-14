@@ -67,7 +67,7 @@ services:
       AGENTE_DADOS_DIR: /dados
       AGENTE_SAIDA_DIR: /saida
     volumes:
-      - ${MODULO1_DADOS:-./agente/modulo1}:/modulo1:ro   # pasta data/ do módulo 1
+      - ${MODULO1_DADOS:-./etl/data}:/modulo1:ro         # pasta data/ do módulo 1
       - ./agente/perfis:/app/perfis:ro                  # editar um perfil não exige rebuild
       - ./agente/dados:/dados
       - ${MODULO2_PASTA:-./modulo2_saida}:/saida         # a mesma pasta que o modulo3 lê
