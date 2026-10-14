@@ -1,0 +1,62 @@
+# Uso:
+#   docker compose build
+#   docker compose run --rm prospeccao amostra                 # base fictícia (ou: carga, para a real)
+#   docker compose run --rm prospeccao usuario criar SEU_NOME  # primeiro usuário da interface
+#   docker compose up -d web                                   # interface em http://localhost:8501
+#   docker compose run --rm testes                             # pytest
+#   docker compose --profile agendador up -d agendador         # carga automática de cada mês novo
+# Os dados ficam em ./data no seu computador (bronze, silver, gold e app).
+
+x-base: &base
+  build: .
+  image: prospeccao:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    PROSPECCAO_DATA_DIR: /app/data
+    # Arquivos temporários grandes (~25 GB de CSV na carga) num volume interno do Docker:
+    # bem mais rápido que a pasta compartilhada com o computador (sobretudo no Docker Desktop).
+    PROSPECCAO_TRABALHO_DIR: /app/trabalho
+  volumes:
+    - ./data:/app/data
+    - trabalho:/app/trabalho
+  # Em Linux, se o seu usuário não tiver UID 1000: UID=$(id -u) GID=$(id -g) docker compose run ...
+  user: "${UID:-1000}:${GID:-1000}"
+
+services:
+  web:
+    <<: *base
+    command: ["web", "--endereco", "0.0.0.0", "--porta", "8501"]
+    ports:
+      # Só este computador. Para acesso pela rede, coloque um proxy com HTTPS na frente.
+      - "127.0.0.1:${WEB_PORTA:-8501}:8501"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  agendador:
+    <<: *base
+    profiles: ["agendador"]
+    command: ["agendador"]
+    restart: unless-stopped
+
+  prospeccao:
+    <<: *base
+    profiles: ["cli"]
+    command: ["--help"]
+
+  testes:
+    <<: *base
+    profiles: ["testes"]
+    entrypoint: ["pytest"]
+    command: []
+    volumes: []
+    environment:
+      PROSPECCAO_TRABALHO_DIR: ""
+
+volumes:
+  trabalho:

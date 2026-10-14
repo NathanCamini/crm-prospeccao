@@ -1,0 +1,1 @@
+"""Camadas silver e gold."""

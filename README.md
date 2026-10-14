@@ -196,6 +196,7 @@ Não há envio automático. Ele entra na fase seguinte, só para e-mail e com ap
 cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento entre empresas, estágios, contato, supressão, agente,
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
 cd modulo3_stub && pytest   # 8 testes: dados fictícios, busca, CSV do agente
+cd etl && pytest            # 182 testes do módulo 1: carga, consultas, contatos, exportação, interface
 cd agente && pytest         # 64 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM
 cd frontend && npm run build  # checagem de tipos + build
 ```
@@ -205,6 +206,7 @@ cd frontend && npm run build  # checagem de tipos + build
 ```
 backend/        API do CRM (FastAPI + SQLite)
 frontend/       interface (React + TypeScript + Vite), servida por nginx
+etl/            módulo 1: carga dos Dados Abertos do CNPJ (DuckDB), interface Streamlit e agente do Colab — ver etl/README.md
 modulo3_stub/   módulo 3 simulado (FastAPI)
 agente/         módulo 2: agente classificador (perfis, contrato do mês, Gemini) — ver agente/README.md
 contrato/       contrato v1 entre módulo 3 e CRM (JSON Schema)
