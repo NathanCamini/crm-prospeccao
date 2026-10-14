@@ -36,6 +36,7 @@ O login fica salvo por 30 dias se "Manter conectado" estiver marcado.
 | `docker compose run --rm crm-api python -m crm sincronizar` | copiar agora os leads do módulo 3 |
 | `docker compose run --rm crm-api python -m crm auditoria verificar` | conferir se algum registro da auditoria foi alterado ou apagado direto no arquivo |
 | `docker compose --profile testes run --rm testes` | testes da API |
+| `docker compose --profile testes run --rm testes-agente` | testes do agente (módulo 2) |
 | `docker compose logs -f crm-api` | acompanhar a API |
 
 Os dados do CRM ficam em `./dados/crm.sqlite`. Em Linux, se aparecer "Permission denied" em `./dados`, rode com `UID=$(id -u) GID=$(id -g) docker compose …`.
@@ -120,20 +121,24 @@ Para não mandar mensagem a ninguém por engano:
 
 ## Ligar ao módulo 2 (agente)
 
-Dá para usar o agente real antes de existir o módulo 3, só com variáveis no `.env`.
+O agente fica em [`agente/`](agente/README.md). Dá para usar a saída dele antes de existir o módulo 3 real.
 
-**Leads vindos do CSV do agente.** Aponte a pasta e o arquivo:
+**Leads vindos do CSV do agente.** Com o mês classificado, o agente grava `classificacao.csv` em `MODULO2_PASTA` (a mesma pasta que o módulo 3 lê). Defina o arquivo no `.env` e reinicie o módulo 3, que lê o CSV ao subir:
+
+```bash
+docker compose run --rm agente exportar-crm
+docker compose restart modulo3
+```
 
 ```env
-MODULO2_PASTA=../agente/saida
 MODULO2_CSV=/modulo2/classificacao.csv
 ```
 
-Separador `;` ou `,`, UTF-8. Colunas obrigatórias: `cnpj`, `razao_social`, `perfil_id`, `score`. Opcionais: `nome_fantasia`, `uf`, `municipio`, `bairro`, `cnae_principal`, `cnae_descricao`, `porte`, `capital_social`, `data_inicio_atividade` (AAAA-MM-DD), `matriz_filial`, `situacao_cadastral`, `logradouro`, `numero`, `cep`, `ddd_1`, `telefone_1`, `ddd_2`, `telefone_2`, `email`, `e_alvo`, `perfil_versao`, `justificativa`, `e_franquia`, `marca`, `padrao`, `produto_sugerido`, `classificado_em`, `mes_referencia`. Sem `e_alvo`, entra como alvo quem tem score ≥ 60.
+O agente grava uma linha por CNPJ × perfil, da versão vigente de cada perfil, com todas as colunas abaixo. Separador `;` ou `,`, UTF-8. Colunas obrigatórias: `cnpj`, `razao_social`, `perfil_id`, `score`. Opcionais: `nome_fantasia`, `uf`, `municipio`, `bairro`, `cnae_principal`, `cnae_descricao`, `porte`, `capital_social`, `data_inicio_atividade` (AAAA-MM-DD), `matriz_filial`, `situacao_cadastral`, `logradouro`, `numero`, `cep`, `ddd_1`, `telefone_1`, `ddd_2`, `telefone_2`, `email`, `e_alvo`, `perfil_versao`, `justificativa`, `e_franquia`, `marca`, `padrao`, `produto_sugerido`, `classificado_em`, `mes_referencia`. Sem `e_alvo`, entra como alvo quem tem score ≥ 60.
 
 Com o CSV real os links passam a abrir de verdade (a fonte deixa de ser "simulado").
 
-**Perguntas ao agente.** O agente precisa expor um endpoint HTTP:
+**Perguntas ao agente.** Ainda não existe: o agente de `agente/` só classifica, então o CRM segue com a resposta simulada. Para ligar, o agente precisa expor um endpoint HTTP:
 
 ```
 POST {AGENTE_URL}
@@ -191,6 +196,7 @@ Não há envio automático. Ele entra na fase seguinte, só para e-mail e com ap
 cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento entre empresas, estágios, contato, supressão, agente,
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
 cd modulo3_stub && pytest   # 8 testes: dados fictícios, busca, CSV do agente
+cd agente && pytest         # 64 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM
 cd frontend && npm run build  # checagem de tipos + build
 ```
 
@@ -200,9 +206,10 @@ cd frontend && npm run build  # checagem de tipos + build
 backend/        API do CRM (FastAPI + SQLite)
 frontend/       interface (React + TypeScript + Vite), servida por nginx
 modulo3_stub/   módulo 3 simulado (FastAPI)
+agente/         módulo 2: agente classificador (perfis, contrato do mês, Gemini) — ver agente/README.md
 contrato/       contrato v1 entre módulo 3 e CRM (JSON Schema)
 dados/          banco do CRM (montado no contêiner)
-modulo2_saida/  pasta para o CSV do agente, se usado
+modulo2_saida/  CSV que o agente grava e o módulo 3 lê
 ```
 
 ## Decisões

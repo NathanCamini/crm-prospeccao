@@ -50,8 +50,36 @@ services:
     ports:
       - "${CRM_ENDERECO:-127.0.0.1}:${CRM_PORTA:-8080}:8080"
 
+  # Agente classificador (módulo 2). Roda sob demanda, não fica no ar:
+  #   docker compose run --rm agente classificar --mes 2026-10 --perfil amenities_hotel
+  #   docker compose run --rm agente exportar-crm && docker compose restart modulo3
+  agente:
+    profiles: ["agente"]
+    build: ./agente
+    image: prospeccao-agente:latest
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AGENTE_MODELO_TRIAGEM: ${AGENTE_MODELO_TRIAGEM:-gemini-2.5-flash-lite}
+      AGENTE_MODELO_REVISAO: ${AGENTE_MODELO_REVISAO:-gemini-3.8-flash}
+      AGENTE_ENTRADA_DIR: /modulo1/exportacoes/novas
+      AGENTE_GOLD_DB: /modulo1/gold/empresas.duckdb   # sinal de sócio holding; sem o arquivo, segue sem ele
+      AGENTE_DADOS_DIR: /dados
+      AGENTE_SAIDA_DIR: /saida
+    volumes:
+      - ${MODULO1_DADOS:-./agente/modulo1}:/modulo1:ro   # pasta data/ do módulo 1
+      - ./agente/perfis:/app/perfis:ro                  # editar um perfil não exige rebuild
+      - ./agente/dados:/dados
+      - ${MODULO2_PASTA:-./modulo2_saida}:/saida         # a mesma pasta que o modulo3 lê
+
   testes:
     profiles: ["testes"]
     image: prospeccao-crm-api:latest
     build: ./backend
     command: ["python", "-m", "pytest", "-q"]
+
+  testes-agente:
+    profiles: ["testes"]
+    image: prospeccao-agente:latest
+    build: ./agente
+    entrypoint: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]

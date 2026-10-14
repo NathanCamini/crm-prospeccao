@@ -1,0 +1,31 @@
+# Perfil de cliente ideal: um arquivo por produto. Mudou critério ou filtro? Suba a `versao`:
+# as empresas são reclassificadas com o perfil novo e as classificações antigas ficam no histórico.
+id: amenities_hotel
+versao: 3
+produto: "Kit de amenities (sabonete, shampoo) para hotelaria"
+
+filtro_sql:            # etapa barata, roda no DuckDB
+  cnae_prefixos: ["5510", "5590"]   # hotéis, apart-hotéis, motéis, pousadas e outros alojamentos
+  situacao: [ATIVA]
+  capital_social_min: 100000
+  excluir_mei: true
+
+criterios_llm:          # etapa cara, só no que passou
+  - "É hospedagem com quartos (não só eventos ou restaurante)?"
+  - "É franquia ou bandeira de rede? Qual?"
+  - "Posicionamento provável: econômico, médio ou alto padrão?"
+
+saida_score: 0-100
+canal_preferido: [email, ligacao, whatsapp_assistido]
+
+# Opcionais (valores padrão entre parênteses)
+produtos_sugeriveis:   # (só o `produto`)
+  - "Kit econômico (sabonete + shampoo)"
+  - "Kit completo (sabonete, shampoo, condicionador, hidratante)"
+  - "Kit personalizado com a marca do hotel"
+padroes: [economico, medio, alto, indefinido]
+limiar_alvo: 60        # (60) score mínimo para a empresa virar alvo
+revisao:
+  score_min: 60        # (60) a partir deste score, o modelo maior confirma antes de virar alvo
+  confianca_baixa: true
+limite_candidatos: 5000  # (5000) trava de custo: um funil maior que isso interrompe a execução
