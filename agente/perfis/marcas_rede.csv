@@ -1,0 +1,35 @@
+# Redes e marcas usadas como sinal de franquia/bandeira (separador ';', listas com '|').
+# LISTA INICIAL de hotelaria, a completar e revisar com o catálogo da ABF e os sites das redes.
+# rede     = grupo dono das marcas. Domínio e holding indicam a REDE; só o nome indica a MARCA.
+# aliases  = termos procurados no nome fantasia e na razão social (vazio = o nome da marca).
+#            Bandeira de nome genérico: só as formas completas ("comfort suites", nunca "comfort").
+# dominios = domínios de e-mail/site confirmados como da rede (basta numa linha da rede).
+#            Um domínio errado gera sinal falso.
+# holdings = nomes de holdings da rede, procurados nos sócios pessoa jurídica (basta numa linha da rede).
+rede;marca;aliases;dominios;holdings
+Accor;ibis;ibis|ibis budget|ibis styles;accor.com|all.accor.com;accor|hotelaria accor
+Accor;Mercure;mercure|grand mercure;;
+Accor;Novotel;;;
+Accor;Sofitel;;;
+Accor;Pullman;;;
+Accor;Adagio;;;
+Atlantica Hospitality;Comfort;comfort hotel|comfort suites|comfort inn;choicehotels.com;atlantica hotels
+Atlantica Hospitality;Quality;quality hotel|quality suites|quality inn;;
+Atlantica Hospitality;Sleep Inn;;;
+Atlantica Hospitality;Clarion;;;
+IHG;Holiday Inn;holiday inn|holiday inn express;ihg.com;
+IHG;InterContinental;;;
+IHG;Crowne Plaza;;;
+Hilton;Hilton;hilton|doubletree|hampton by hilton;hilton.com;
+Wyndham;Wyndham;wyndham|ramada|days inn|tryp;wyndhamhotels.com;
+Best Western;Best Western;;bestwestern.com;
+Radisson;Radisson;radisson|park inn;radissonhotels.com;
+Golden Tulip;Golden Tulip;golden tulip|tulip inn;;
+Bourbon;Bourbon;bourbon;bourbon.com.br;
+Blue Tree;Blue Tree;;bluetree.com.br;
+Vila Gale;Vila Gale;;vilagale.com;
+Nobile;Nobile;;;
+Intercity;Intercity;;;
+Slaviero;Slaviero;;;
+Transamerica;Transamerica;;;
+Laghetto;Laghetto;;;
