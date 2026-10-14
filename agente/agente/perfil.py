@@ -41,6 +41,7 @@ class FiltroSQL(_Estrito):
     excluir_mei: bool = False
     portes: list[Literal[PORTES]] = []  # type: ignore[valid-type]
     ufs: list[Literal[UFS]] = []  # type: ignore[valid-type]
+    municipios: list[str] = []      # nome do município, comparado sem acento e sem diferenciar maiúsculas
     matriz_filial: Literal["MATRIZ", "FILIAL"] | None = None
 
     @field_validator("cnae_prefixos", "cnaes")
@@ -75,6 +76,8 @@ class Perfil(_Estrito):
     id: str = Field(pattern=r"^[a-z0-9_]{3,60}$")
     versao: int = Field(ge=1)
     produto: str = Field(min_length=3)
+    nome: str | None = None          # como aparece no CRM (padrão: o produto)
+    dono: str | None = None          # empresa cliente que descreveu o produto (perfil criado pelo CRM)
     filtro_sql: FiltroSQL
     criterios_llm: list[str] = Field(min_length=1)
     saida_score: Literal["0-100"] = "0-100"
@@ -90,6 +93,10 @@ class Perfil(_Estrito):
         if "indefinido" not in self.padroes:
             raise ValueError("padroes precisa incluir 'indefinido' (resposta quando os dados não permitem concluir)")
         return self
+
+    @property
+    def rotulo(self) -> str:
+        return self.nome or self.produto
 
     @property
     def produtos(self) -> list[str]:

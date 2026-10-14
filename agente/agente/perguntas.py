@@ -1,17 +1,10 @@
-"""Perguntas do CRM ao agente: `POST /perguntar`, chamado pelo módulo 3 (`AGENTE_URL`).
-
-    POST /perguntar  {"pergunta": "texto", "contexto": { ...Lead do contrato v1... } | null}
-                     → 200 {"resposta": "texto"}
-    GET  /saude      → {"ok": true, "modelo": ..., "chave": true|false}
+"""Perguntas do CRM ao agente (`POST /perguntar` em api.py, chamado pelo módulo 3).
 
 Com `contexto`, a pergunta é sobre uma empresa: o modelo recebe os dados dela e a classificação.
 Sem `contexto`, é uma conversa geral: o modelo recebe o resumo das classificações do agente e os
 principais alvos do último CSV exportado. Nos dois casos vale a minimização de dados da
 classificação (D61): sem CNPJ, telefone e e-mail; CPF mascarado; razão social de pessoa física fora.
 Dos contatos complementares, vai só o tipo e a confiança, nunca o valor.
-
-Servidor da biblioteca padrão (ThreadingHTTPServer): o agente não ganha dependência nova. Fica
-só na rede interna do Docker; não publique a porta.
 """
 
 from __future__ import annotations
@@ -20,8 +13,6 @@ import csv
 import json
 import logging
 import re
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from agente.armazenamento import ClassificacaoStore
@@ -93,23 +84,35 @@ def resumo_lead(lead: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def resumo_base(cfg: AgenteConfig) -> dict[str, Any]:
-    """Para perguntas gerais: totais por perfil e mês e os principais alvos do último CSV exportado."""
+def resumo_base(cfg: AgenteConfig, perfis: list[str] | None = None) -> dict[str, Any]:
+    """Para perguntas gerais: totais por perfil e mês e os principais alvos do último CSV exportado.
+
+    Só entram os `perfis` da empresa cliente que perguntou. Sem a lista, só os perfis do repositório:
+    leads do produto de uma empresa cliente nunca aparecem para outra.
+    """
+    store = ClassificacaoStore(cfg.banco) if cfg.banco.exists() else None
+    if perfis is None:
+        de_clientes = {p["id"] for p in store.perfis_cliente(ativos=False)} if store else set()
+        permitido = lambda perfil_id: perfil_id not in de_clientes  # noqa: E731
+    else:
+        permitido = set(perfis).__contains__
     totais: list[dict[str, Any]] = []
-    if cfg.banco.exists():
+    if store is not None:
         totais = [{k: t[k] for k in ("mes", "perfil_id", "perfil_versao", "classificadas", "alvos")}
-                  for t in ClassificacaoStore(cfg.banco).custos()]
+                  for t in store.custos() if permitido(t["perfil_id"])]
     alvos: list[dict[str, Any]] = []
     linhas: list[dict[str, str]] = []
     arquivo = cfg.saida_dir / ARQUIVO_CRM
     if arquivo.exists():
         with arquivo.open(encoding="utf-8-sig", newline="") as f:
-            linhas = [r for r in csv.DictReader(f, delimiter=";") if (r.get("e_alvo") or "").lower() == "sim"]
+            linhas = [r for r in csv.DictReader(f, delimiter=";")
+                      if (r.get("e_alvo") or "").lower() == "sim" and permitido(r.get("perfil_id") or "")]
         linhas.sort(key=lambda r: -int(float(r.get("score") or 0)))
         for r in linhas[:MAXIMO_ALVOS_NO_CONTEXTO]:
             alvos.append({
                 "nome": r.get("nome_fantasia") or _mascarar(r.get("razao_social")),
-                "municipio": r.get("municipio"), "uf": r.get("uf"), "perfil": r.get("perfil_id"),
+                "municipio": r.get("municipio"), "uf": r.get("uf"),
+                "perfil": r.get("perfil_nome") or r.get("perfil_id"),
                 "score": r.get("score"), "padrao": r.get("padrao"), "produto_sugerido": r.get("produto_sugerido"),
                 "franquia": r.get("e_franquia") or None, "marca": r.get("marca") or None,
                 "justificativa": r.get("justificativa"), "aberta_em": r.get("data_inicio_atividade"),
@@ -118,7 +121,7 @@ def resumo_base(cfg: AgenteConfig) -> dict[str, Any]:
             "total_alvos_no_csv": len(linhas)}
 
 
-def validar_corpo(corpo: Any) -> tuple[str, dict[str, Any] | None]:
+def validar_corpo(corpo: Any) -> tuple[str, dict[str, Any] | None, list[str] | None]:
     if not isinstance(corpo, dict):
         raise PerguntaInvalidaError("Envie um objeto JSON com 'pergunta'.")
     pergunta = corpo.get("pergunta")
@@ -129,7 +132,10 @@ def validar_corpo(corpo: Any) -> tuple[str, dict[str, Any] | None]:
     contexto = corpo.get("contexto")
     if contexto is not None and not isinstance(contexto, dict):
         raise PerguntaInvalidaError("'contexto' deve ser um objeto (Lead v1) ou null.")
-    return pergunta.strip(), contexto
+    perfis = corpo.get("perfis")
+    if perfis is not None and (not isinstance(perfis, list) or not all(isinstance(p, str) for p in perfis)):
+        raise PerguntaInvalidaError("'perfis' deve ser uma lista de ids ou null.")
+    return pergunta.strip(), contexto, perfis
 
 
 class Assistente:
@@ -138,8 +144,8 @@ class Assistente:
         self.cliente = cliente
         self.modelo = cfg.modelo_perguntas
 
-    def responder(self, pergunta: str, contexto: dict[str, Any] | None) -> str:
-        dados = {"empresa": resumo_lead(contexto)} if contexto else {"base": resumo_base(self.cfg)}
+    def responder(self, pergunta: str, contexto: dict[str, Any] | None, perfis: list[str] | None = None) -> str:
+        dados = {"empresa": resumo_lead(contexto)} if contexto else {"base": resumo_base(self.cfg, perfis)}
         entrada = "PERGUNTA E DADOS (JSON):\n" + json.dumps({"pergunta": pergunta, **dados}, ensure_ascii=False,
                                                            default=str)
         r = self.cliente.gerar(self.modelo, SISTEMA, entrada, SCHEMA_RESPOSTA)
@@ -156,70 +162,4 @@ class Assistente:
         return resposta
 
 
-def _handler(assistente: Assistente | None, erro_config: str | None) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "agente-perguntas"
-
-        def log_message(self, formato: str, *args: Any) -> None:  # noqa: A002 — assinatura da biblioteca
-            log.info("%s %s", self.address_string(), formato % args)
-
-        def _json(self, status: int, dados: dict[str, Any]) -> None:
-            corpo = json.dumps(dados, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(corpo)))
-            self.end_headers()
-            self.wfile.write(corpo)
-
-        def do_GET(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") == "/saude":
-                self._json(HTTPStatus.OK, {"ok": assistente is not None, "erro": erro_config,
-                                           "modelo": assistente.modelo if assistente else None})
-            else:
-                self._json(HTTPStatus.NOT_FOUND, {"detail": "Use POST /perguntar."})
-
-        def do_POST(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") != "/perguntar":
-                self._json(HTTPStatus.NOT_FOUND, {"detail": "Use POST /perguntar."})
-                return
-            if assistente is None:
-                self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"detail": erro_config})
-                return
-            try:
-                tamanho = int(self.headers.get("Content-Length") or 0)
-                if tamanho > 1_000_000:
-                    raise PerguntaInvalidaError("Corpo grande demais.")
-                pergunta, contexto = validar_corpo(json.loads(self.rfile.read(tamanho) or b"null"))
-            except (PerguntaInvalidaError, ValueError) as exc:
-                self._json(HTTPStatus.BAD_REQUEST, {"detail": str(exc)})
-                return
-            try:
-                self._json(HTTPStatus.OK, {"resposta": assistente.responder(pergunta, contexto)})
-            except Exception as exc:  # noqa: BLE001 — erro do LLM vira 502, sem derrubar o servidor
-                log.exception("Falha ao responder a pergunta")
-                self._json(HTTPStatus.BAD_GATEWAY, {"detail": f"O modelo não respondeu: {exc}"})
-
-    return Handler
-
-
-def criar_servidor(cfg: AgenteConfig, fabrica_cliente: Any, endereco: str, porta: int) -> ThreadingHTTPServer:
-    """Sem chave do Gemini o servidor sobe mesmo assim e responde 503 com a explicação."""
-    try:
-        assistente, erro = Assistente(cfg, fabrica_cliente(cfg)), None
-    except RuntimeError as exc:
-        assistente, erro = None, str(exc)
-        log.error("%s", exc)
-    return ThreadingHTTPServer((endereco, porta), _handler(assistente, erro))
-
-
-def servir(cfg: AgenteConfig, fabrica_cliente: Any, endereco: str = "0.0.0.0", porta: int = 9000) -> None:
-    servidor = criar_servidor(cfg, fabrica_cliente, endereco, porta)
-    log.info("Perguntas do CRM em http://%s:%d/perguntar (modelo %s)", endereco, porta, cfg.modelo_perguntas)
-    try:
-        servidor.serve_forever()
-    finally:
-        servidor.server_close()
-
-
-__all__ = ["Assistente", "PerguntaInvalidaError", "criar_servidor", "resumo_base", "resumo_lead", "servir",
-           "validar_corpo"]
+__all__ = ["Assistente", "PerguntaInvalidaError", "resumo_base", "resumo_lead", "validar_corpo"]

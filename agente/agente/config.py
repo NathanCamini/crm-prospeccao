@@ -21,7 +21,8 @@ class AgenteConfig:
     gold_db: Path | None = None     # módulo 1: gold DuckDB, só para o sinal de sócio holding (se o arquivo existir)
     modelo_triagem: str = "gemini-2.5-flash-lite"
     modelo_revisao: str = "gemini-3.8-flash"
-    modelo_perguntas: str = "gemini-2.5-flash"   # perguntas do CRM (POST /perguntar)
+    modelo_perguntas: str = "gemini-2.5-flash"   # perguntas do CRM e montagem de perfis a partir da descrição
+    limite_perfil_cliente: int = 1500             # teto de custo: empresas por mês no filtro de um perfil de cliente
     gemini_api_key: str = field(default="", repr=False)
 
     @property
@@ -46,5 +47,6 @@ def carregar_config() -> AgenteConfig:
         modelo_triagem=os.getenv("AGENTE_MODELO_TRIAGEM") or AgenteConfig.modelo_triagem,
         modelo_revisao=os.getenv("AGENTE_MODELO_REVISAO") or AgenteConfig.modelo_revisao,
         modelo_perguntas=os.getenv("AGENTE_MODELO_PERGUNTAS") or AgenteConfig.modelo_perguntas,
+        limite_perfil_cliente=int(os.getenv("AGENTE_LIMITE_PERFIL_CLIENTE") or AgenteConfig.limite_perfil_cliente),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
     )

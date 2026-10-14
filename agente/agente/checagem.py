@@ -18,6 +18,8 @@ from pydantic import ValidationError
 
 from agente.config import AgenteConfig
 from agente.llm import custo_usd
+from agente import catalogo
+from agente.armazenamento import ClassificacaoStore
 from agente.perfil import carregar_perfil
 from agente.prompt import entrada_empresa, instrucao_sistema, texto_entrada
 from agente.resultado import ResultadoLLM, schema_saida
@@ -42,9 +44,12 @@ def _conferir(rotulo: str, modelo: str, texto: str, tokens: tuple[int, int], lot
                   f"· {tokens[0]}+{tokens[1]} tokens · US$ {custo}")
 
 
-def checar(cfg: AgenteConfig, cliente: Any, perfil_id: str, lote: bool = False, espera_maxima_s: float = 3600,
+def checar(cfg: AgenteConfig, cliente: Any, perfil_id: str | None = None, lote: bool = False, espera_maxima_s: float = 3600,
            intervalo_s: float = 30, dormir: Callable[[float], None] = time.sleep) -> tuple[bool, list[str]]:
-    perfil = carregar_perfil(cfg.perfis_dir, perfil_id)
+    if perfil_id is None:  # sem perfil: o de exemplo do repositório
+        perfil = carregar_perfil(cfg.perfis_dir / "exemplos", "amenities_hotel")
+    else:
+        perfil = catalogo.carregar(cfg, ClassificacaoStore(cfg.banco) if cfg.banco.exists() else None, perfil_id)
     sistema, schema = instrucao_sistema(perfil), schema_saida(perfil)
     texto = texto_entrada(entrada_empresa(EMPRESA_TESTE, {"redes": []}, {}))
     linhas, tudo_ok = [f"Perfil {perfil.id} v{perfil.versao} · empresa fictícia"], True

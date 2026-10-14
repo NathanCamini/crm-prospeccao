@@ -1,5 +1,7 @@
-# Perfil de cliente ideal: um arquivo por produto. Mudou critério ou filtro? Suba a `versao`:
-# as empresas são reclassificadas com o perfil novo e as classificações antigas ficam no histórico.
+# EXEMPLO de perfil (não é classificado: só os arquivos direto em perfis/ entram na rotina).
+# No uso normal, cada empresa cliente descreve o que vende no CRM (tela Produtos) e o agente monta o
+# perfil sozinho, neste mesmo formato. Este arquivo serve de referência e para `agente checar`.
+# Mudou critério ou filtro? Suba a `versao`: as empresas são reclassificadas e as antigas ficam no histórico.
 id: amenities_hotel
 versao: 4
 produto: "Kit de amenities (sabonete, shampoo) para hotelaria"

@@ -24,7 +24,7 @@ COLUNAS_CRM = [
     "cnae_principal", "cnae_descricao", "porte", "capital_social", "logradouro", "numero", "bairro", "municipio", "uf",
     "cep", "ddd_1", "telefone_1", "ddd_2", "telefone_2", "email",
     "perfil_id", "perfil_versao", "score", "e_alvo", "justificativa", "e_franquia", "marca", "padrao",
-    "produto_sugerido", "classificado_em", "mes_referencia",
+    "produto_sugerido", "classificado_em", "mes_referencia", "perfil_nome",
 ]
 
 
@@ -41,7 +41,7 @@ def _sim_nao(valor: Any) -> str:
     return "" if valor is None else "sim" if valor else "nao"
 
 
-def _linha(c: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]:
+def _linha(c: dict[str, Any], e: dict[str, Any], nomes: dict[str, str]) -> dict[str, Any]:
     final = json.loads(c["resultado_json"])["final"]
     return {
         "cnpj": c["cnpj"], "razao_social": e["razao_social"], "nome_fantasia": e["nome_fantasia"],
@@ -56,12 +56,13 @@ def _linha(c: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]:
         "e_alvo": _sim_nao(c["e_alvo"]), "justificativa": " ".join((final.get("justificativa") or "").split()),
         "e_franquia": _sim_nao(c["e_franquia"]), "marca": c["marca"], "padrao": final.get("padrao"),
         "produto_sugerido": final.get("produto_sugerido"), "classificado_em": c["classificado_em"],
-        "mes_referencia": c["mes_referencia"],
+        "mes_referencia": c["mes_referencia"], "perfil_nome": nomes.get(c["perfil_id"], c["perfil_id"]),
     }
 
 
 def exportar_crm(store: ClassificacaoStore, novas_dir: Path, schema_dir: Path, saida: Path,
-                 perfis: list[str] | None = None, mes: str | None = None) -> ResumoExportacao:
+                 perfis: list[str] | None = None, mes: str | None = None,
+                 nomes: dict[str, str] | None = None) -> ResumoExportacao:
     """Grava o CSV do CRM. Mês cujo arquivo sumiu ou não passa no contrato é pulado (e contado no resumo)."""
     resumo = ResumoExportacao(perfis=perfis or store.perfis_classificados())
     por_mes: dict[str, list[dict[str, Any]]] = {}
@@ -81,7 +82,7 @@ def exportar_crm(store: ClassificacaoStore, novas_dir: Path, schema_dir: Path, s
         faltando = [c for c in classificadas if c["cnpj"] not in dados]
         if faltando:
             resumo.puladas[mes_ref] = len(faltando)
-        linhas += [_linha(c, dados[c["cnpj"]]) for c in classificadas if c["cnpj"] in dados]
+        linhas += [_linha(c, dados[c["cnpj"]], nomes or {}) for c in classificadas if c["cnpj"] in dados]
         resumo.meses.append(mes_ref)
 
     if not linhas:

@@ -26,9 +26,11 @@ from typing import Any
 from agente.armazenamento import ClassificacaoStore
 from agente.config import AgenteConfig
 from agente.contrato import NOME_MANIFESTO, ContratoInvalidoError, validar_mes
-from agente.exportacao import ARQUIVO_CRM, exportar_crm
+from agente.avaliacao import gravar_csv
+from agente.exportacao import ARQUIVO_CRM, COLUNAS_CRM, exportar_crm
 from agente.funil import FunilGrandeError
-from agente.perfil import PerfilInvalidoError, listar_ids
+from agente import catalogo
+from agente.perfil import PerfilInvalidoError
 from agente.servico import Classificador
 
 log = logging.getLogger("agente.rotina")
@@ -66,10 +68,11 @@ def ultimo_mes(novas_dir: Path) -> str | None:
     return meses[-1] if meses else None
 
 
-def _assinatura(store: ClassificacaoStore) -> list[Any]:
-    """Muda sempre que uma classificação é gravada ou refeita."""
+def _assinatura(store: ClassificacaoStore, nomes: dict[str, str]) -> list[Any]:
+    """Muda quando uma classificação é gravada ou refeita, ou quando um perfil entra, sai ou muda de nome."""
     with store.conexao() as con:
-        return list(con.execute("SELECT count(*), max(classificado_em) FROM classificacao").fetchone())
+        return [*con.execute("SELECT count(*), max(classificado_em) FROM classificacao").fetchone(),
+                dict(sorted(nomes.items()))]
 
 
 def _estado(cfg: AgenteConfig) -> Path:
@@ -89,7 +92,7 @@ def executar_rotina(cfg: AgenteConfig, store: ClassificacaoStore, classificador:
         resumo.erro = str(exc)
         return resumo
 
-    for perfil_id in perfis or listar_ids(cfg.perfis_dir):
+    for perfil_id in perfis or catalogo.ids_ativos(cfg, store):
         try:
             r = classificador.executar(mes, perfil_id, modo="lote", aguardar=aguardar, intervalo_s=intervalo_s)
         except (PerfilInvalidoError, FunilGrandeError, ContratoInvalidoError) as exc:
@@ -106,14 +109,15 @@ def executar_rotina(cfg: AgenteConfig, store: ClassificacaoStore, classificador:
             log.warning("%s: %s", perfil_id, falha)
 
     if not resumo.pendentes:
-        resumo.exportado = _exportar_se_mudou(cfg, store)
+        resumo.exportado = exportar_se_mudou(cfg, store)
     return resumo
 
 
-def _exportar_se_mudou(cfg: AgenteConfig, store: ClassificacaoStore) -> str | None:
-    assinatura = _assinatura(store)
-    if not assinatura[0]:
-        return None
+def exportar_se_mudou(cfg: AgenteConfig, store: ClassificacaoStore) -> str | None:
+    """Grava o CSV do módulo 3 com os perfis ativos, se algo mudou desde a última exportação."""
+    nomes = catalogo.rotulos(cfg, store)
+    assinatura = _assinatura(store, nomes)
+    classificados = set(store.perfis_classificados()) & set(nomes)
     saida = cfg.saida_dir / ARQUIVO_CRM
     try:
         anterior = json.loads(_estado(cfg).read_text(encoding="utf-8")).get("exportado")
@@ -121,7 +125,13 @@ def _exportar_se_mudou(cfg: AgenteConfig, store: ClassificacaoStore) -> str | No
         anterior = None
     if anterior == assinatura and saida.exists():
         return None
-    r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida)
+    if not classificados:
+        if not saida.exists():
+            return None
+        gravar_csv(saida, [], COLUNAS_CRM)  # o último perfil ativo saiu: o módulo 3 deixa de entregar os leads dele
+        _estado(cfg).write_text(json.dumps({"exportado": assinatura}), encoding="utf-8")
+        return f"{saida} (nenhum perfil ativo classificado)"
+    r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, sorted(classificados), nomes=nomes)
     _estado(cfg).write_text(json.dumps({"exportado": assinatura}), encoding="utf-8")
     for mes, n in r.puladas.items():
         log.warning("%d classificações de %s ficaram fora do CSV (arquivo do mês ausente ou alterado)", n, mes)

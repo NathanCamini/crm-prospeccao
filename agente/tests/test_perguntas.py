@@ -13,7 +13,8 @@ import pytest
 
 from agente.config import AgenteConfig
 from agente.llm import RespostaLLM
-from agente.perguntas import Assistente, criar_servidor, resumo_lead, validar_corpo, PerguntaInvalidaError
+from agente.api import Servicos, criar_servidor
+from agente.perguntas import Assistente, PerguntaInvalidaError, resumo_lead, validar_corpo
 from tests.apoio import montar_cfg
 
 LEAD = {
@@ -107,7 +108,12 @@ def _post(url: str, corpo: Any) -> tuple[int, dict[str, Any]]:
 @pytest.fixture()
 def servidor(tmp_path: Path):
     def subir(fabrica) -> str:
-        srv = criar_servidor(montar_cfg(tmp_path), fabrica, "127.0.0.1", 0)
+        cfg = montar_cfg(tmp_path)
+        try:
+            servicos = Servicos(Assistente(cfg, fabrica(cfg)))
+        except RuntimeError as exc:
+            servicos = Servicos(erro=str(exc))
+        srv = criar_servidor(servicos, "127.0.0.1", 0)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         servidores.append(srv)
         return f"http://127.0.0.1:{srv.server_address[1]}"
@@ -123,7 +129,7 @@ def test_http_no_contrato_do_modulo3(servidor) -> None:
     url = servidor(lambda cfg: LLMFalso())
     assert _post(url + "/perguntar", {"pergunta": "Vale a pena?", "contexto": LEAD}) == (200, {"resposta": "Ligue pela manhã."})
     assert _post(url + "/perguntar", {"pergunta": "Quantos alvos?", "contexto": None})[0] == 200
-    assert _post(url + "/perguntar", {"contexto": LEAD})[0] == 400
+    assert _post(url + "/perguntar", {"contexto": LEAD})[0] == 422
     with urllib.request.urlopen(url + "/saude", timeout=5) as r:
         assert json.loads(r.read())["ok"] is True
 

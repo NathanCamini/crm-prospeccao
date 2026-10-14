@@ -18,12 +18,13 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from agente import catalogo
 from agente.armazenamento import ClassificacaoStore, Lote, Registro
 from agente.config import AgenteConfig
 from agente.contrato import ArquivoDoMes, validar_mes
 from agente.funil import candidatos, descricoes_cnae
 from agente.llm import RespostaLLM, custo_usd
-from agente.perfil import Perfil, carregar_perfil
+from agente.perfil import Perfil
 from agente.prompt import entrada_empresa, hash_entrada, hash_prompt, instrucao_sistema, texto_entrada
 from agente.resultado import ResultadoLLM, aplicar_regras, schema_saida
 from agente.sinais import DetectorSinais, Rede
@@ -110,7 +111,7 @@ class Classificador:
             raise ValueError(f"Modo inválido: {modo}. Use: {', '.join(MODOS)}")
         if amostra is not None and amostra < 1:
             raise ValueError("amostra precisa ser pelo menos 1")
-        perfil = carregar_perfil(self.cfg.perfis_dir, perfil_id)
+        perfil = catalogo.carregar(self.cfg, self.store, perfil_id)
         resumo = Resumo(perfil.id, perfil.versao, mes, modo)
         self.store.encerrar_lotes_de_versoes_antigas(perfil.id, perfil.versao, mes)
 
