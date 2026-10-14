@@ -137,7 +137,7 @@ def _vazio(valor: str | None) -> str | None:
     return valor if valor not in (None, "") else None
 
 
-def ler_csv_modulo2(caminho: Path) -> list[Lead]:
+def ler_csv_modulo2(caminho: Path, nomes: dict[str, dict] | None = None) -> list[Lead]:
     """Lê o CSV de saída do agente. Colunas obrigatórias: cnpj, razao_social,
     perfil_id, score. As demais são opcionais (ver README)."""
     texto = caminho.read_text(encoding="utf-8-sig")
@@ -189,6 +189,8 @@ def ler_csv_modulo2(caminho: Path) -> list[Lead]:
         )
         lead.canal_sugerido = seed._canal([], receita)
         leads.append(lead)
+        if nomes is not None and g.get("perfil_nome"):
+            nomes[lead.classificacao.perfil_id] = {"nome": g["perfil_nome"]}
     return leads
 
 
@@ -219,11 +221,12 @@ class Fonte:
             with self._trava:
                 if marca != self._marca:
                     try:
-                        leads = ler_csv_modulo2(self.csv)
+                        nomes: dict[str, dict] = {}
+                        leads = ler_csv_modulo2(self.csv, nomes)
                     except (OSError, ValueError, KeyError) as erro:
                         log.error("Não foi possível ler %s (%s); segue o anterior.", self.csv, erro)
                     else:
-                        self._repo = Repositorio(leads=leads, fonte="modulo2", perfis_nome=seed.PERFIS,
+                        self._repo = Repositorio(leads=leads, fonte="modulo2", perfis_nome={**seed.PERFIS, **nomes},
                                                  contatos_de=self.contatos_de)
                         log.info("%s carregado: %d leads", self.csv, len(leads))
                     self._marca = marca

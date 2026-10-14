@@ -87,12 +87,71 @@ def test_csv_do_modulo2(tmp_path: Path):
     assert leads[0].canal_sugerido == "email"
 
 
-def test_perguntar_repassa_o_motivo_do_agente(monkeypatch):
-    import httpx
+class AgenteFalso:
+    """Imita o servidor do agente: guarda as chamadas e devolve o que o teste pedir."""
 
-    monkeypatch.setenv("AGENTE_URL", "http://agente:9000/perguntar")
-    resposta = httpx.Response(503, json={"detail": "GEMINI_API_KEY não configurada"},
-                              request=httpx.Request("POST", "http://agente:9000/perguntar"))
-    monkeypatch.setattr("modulo3.main.httpx.post", lambda *a, **k: resposta)
+    def __init__(self, status: int = 200, corpo=None):
+        self.status, self.corpo, self.chamadas = status, corpo, []
+
+    def __call__(self, metodo, url, **kwargs):
+        import httpx
+
+        self.chamadas.append((metodo, url, kwargs))
+        corpo = self.corpo(metodo) if callable(self.corpo) else self.corpo
+        return httpx.Response(self.status, json=corpo if corpo is not None else {"resposta": "real"},
+                              request=httpx.Request(metodo, url))
+
+
+def test_perguntar_repassa_o_motivo_do_agente(monkeypatch):
+    monkeypatch.setenv("AGENTE_API", "http://agente:9000")
+    monkeypatch.setattr("modulo3.main.httpx.request", AgenteFalso(503, {"detail": "GEMINI_API_KEY não configurada"}))
     r = _cliente().post("/v1/perguntar", json={"pergunta": "oi"})
-    assert r.status_code == 502 and "GEMINI_API_KEY" in r.json()["detail"]
+    assert r.status_code == 503 and "GEMINI_API_KEY" in r.json()["detail"]
+
+
+def test_perguntar_leva_os_perfis_da_empresa_e_aceita_agente_url_antigo(monkeypatch):
+    monkeypatch.delenv("AGENTE_API", raising=False)
+    monkeypatch.setenv("AGENTE_URL", "http://agente:9000/perguntar")
+    agente = AgenteFalso()
+    monkeypatch.setattr("modulo3.main.httpx.request", agente)
+    r = _cliente().post("/v1/perguntar", json={"pergunta": "Quais os melhores?", "perfis": ["c7_x_ab12"]})
+    assert r.json() == {"resposta": "real", "fonte": "modulo2"}
+    metodo, url, kwargs = agente.chamadas[0]
+    assert (metodo, url) == ("POST", "http://agente:9000/perguntar") and kwargs["json"]["perfis"] == ["c7_x_ab12"]
+
+
+def test_produtos_repassados_ao_agente(monkeypatch):
+    monkeypatch.setenv("AGENTE_API", "http://agente:9000")
+    agente = AgenteFalso(corpo=lambda metodo: [] if metodo == "GET" else {"ok": True})
+    monkeypatch.setattr("modulo3.main.httpx.request", agente)
+    c = _cliente()
+    assert c.post("/v1/produtos/sugerir", json={"dono": "7", "descricao": "Vendo X para Y"}).status_code == 200
+    assert c.post("/v1/produtos", json={"dono": "7", "descricao": "d", "perfil": {}}).status_code == 202
+    assert c.get("/v1/produtos", params={"dono": "7"}).status_code == 200
+    assert c.delete("/v1/produtos/c7_x_ab12", params={"dono": "7"}).status_code == 200
+    assert [(m, u.removeprefix("http://agente:9000")) for m, u, _ in agente.chamadas] == [
+        ("POST", "/perfis/sugerir"), ("POST", "/perfis"), ("GET", "/perfis"), ("DELETE", "/perfis/c7_x_ab12")]
+    assert agente.chamadas[2][2]["params"] == {"dono": "7"}
+
+
+def test_produto_de_outro_cliente_e_descricao_vaga_passam_o_motivo(monkeypatch):
+    monkeypatch.setenv("AGENTE_API", "http://agente:9000")
+    monkeypatch.setattr("modulo3.main.httpx.request", AgenteFalso(422, {"detail": "Diga para quem você vende"}))
+    r = _cliente().post("/v1/produtos/sugerir", json={"dono": "7", "descricao": "x"})
+    assert r.status_code == 422 and r.json()["detail"] == "Diga para quem você vende"
+
+
+def test_produtos_sem_agente(monkeypatch):
+    monkeypatch.delenv("AGENTE_API", raising=False)
+    monkeypatch.delenv("AGENTE_URL", raising=False)
+    assert _cliente().get("/v1/produtos", params={"dono": "7"}).status_code == 503
+
+
+def test_nome_do_perfil_vem_do_csv(tmp_path: Path):
+    from modulo3.dados import Fonte
+
+    arquivo = tmp_path / "classificacao.csv"
+    arquivo.write_text("cnpj;razao_social;perfil_id;score;e_alvo;perfil_nome\n"
+                       "12345678000195;HOTEL TESTE LTDA;c7_amenities_ab12;88;sim;Amenities para hotéis\n", encoding="utf-8")
+    perfis = Fonte(arquivo).repo().perfis()
+    assert [(p.id, p.nome, p.total_alvos) for p in perfis] == [("c7_amenities_ab12", "Amenities para hotéis", 1)]

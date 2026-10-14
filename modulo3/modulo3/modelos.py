@@ -117,6 +117,8 @@ class Pergunta(BaseModel):
     cnpj: str | None = None
     # Dados de um lead que o módulo 3 não conhece (cadastrado à mão no CRM).
     contexto: dict | None = None
+    # Perfis da empresa cliente que pergunta: a pergunta geral só vê os leads deles.
+    perfis: list[str] | None = None
 
 
 class Resposta(BaseModel):
