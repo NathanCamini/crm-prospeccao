@@ -22,7 +22,7 @@ from agente import catalogo
 from agente.armazenamento import ClassificacaoStore, Lote, Registro
 from agente.config import AgenteConfig
 from agente.contrato import ArquivoDoMes, validar_mes
-from agente.funil import candidatos, descricoes_cnae
+from agente.funil import candidatos, dados_basicos, descricoes_cnae
 from agente.llm import RespostaLLM, custo_usd
 from agente.perfil import Perfil
 from agente.prompt import entrada_empresa, hash_entrada, hash_prompt, instrucao_sistema, texto_entrada
@@ -93,6 +93,8 @@ class Classificador:
     def preparar(self, mes: str, perfil: Perfil, limite: int | None = None) -> tuple[ArquivoDoMes, list[dict[str, Any]]]:
         arquivo = validar_mes(self.cfg.novas_dir, mes, self.cfg.schema_dir)
         empresas = candidatos(arquivo, perfil, limite)
+        if empresas:  # o CSV do CRM tira daqui o cadastro, mesmo depois que o arquivo do mês for apagado
+            self.store.gravar_cadastro(mes, dados_basicos(arquivo, [e["cnpj"] for e in empresas]))
         descricoes = descricoes_cnae(arquivo)
         socios = self.buscar_socios([e["cnpj_basico"] for e in empresas]) if self.buscar_socios and empresas else {}
         detector = DetectorSinais(self.redes, socios)

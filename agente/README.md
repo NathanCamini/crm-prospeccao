@@ -44,7 +44,7 @@ pip install -e ".[dev]"
 agente validar --mes 2026-09      # lê ../etl/data por padrão
 ```
 
-Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exportacoes/novas`), `AGENTE_GOLD_DB` (`../etl/data/gold/empresas.duckdb`; sem o arquivo, segue sem o sinal de sócio), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`, `AGENTE_MODELO_PERGUNTAS`.
+Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exportacoes/novas`), `AGENTE_GOLD_DB` (`../etl/data/gold/empresas.duckdb`; sem o arquivo, segue sem o sinal de sócio), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`, `AGENTE_MODELO_PERGUNTAS`, `AGENTE_LIMITE_PERFIL_CLIENTE` (1500), `AGENTE_JANELA_LEADS_DIAS` (180; 0 = sem limite).
 
 ## Comandos
 
@@ -209,7 +209,9 @@ Na base real de 2026-09, entre as 1.412 hospedagens novas (CNAE 5510/5590), os s
 **CSV do CRM (`exportar-crm`).** `classificacao.csv`, separador `;`, UTF-8 com BOM, nas colunas que o módulo 3 lê (lista em "Ligar ao módulo 2" no [README da raiz](../README.md)): dados cadastrais e contato da Receita tirados do arquivo do mês, mais `perfil_id`, `perfil_versao`, `score`, `e_alvo` e `e_franquia` (`sim`/`nao`, vazio = indeterminado), `justificativa`, `marca`, `padrao`, `produto_sugerido`, `classificado_em` e `mes_referencia`.
 
 - O arquivo é gravado ao lado e renomeado: o módulo 3 nunca lê um CSV pela metade.
-- Mês cujo arquivo sumiu ou mudou fica fora, com aviso. Se nada sobrar, o CSV anterior é mantido.
+- O cadastro de cada empresa que passou no funil fica guardado no banco do agente (`empresa_cadastro`). O módulo 1 mantém só o arquivo do mês atual, e os leads dos meses anteriores continuam no CSV.
+- Só entram empresas abertas há no máximo `AGENTE_JANELA_LEADS_DIAS` (180). Lead mais velho sai do CSV; no CRM continua visível para quem já o trabalhou.
+- Se nada sobrar, o CSV anterior é mantido; se o último produto ativo for removido, fica só o cabeçalho.
 - Lead que deixa de vir no CSV não some do CRM para quem já o trabalhou (o CRM marca como ausente).
 
 ## Quando reclassifica
@@ -290,3 +292,4 @@ Numeração contínua com o README da raiz.
 | D69 | `agente rotina`: classificação em lote de todos os perfis e exportação só quando nenhum lote está em andamento e há classificação nova (contagem e data da última gravada). | Roda a cada poucas horas sem gastar nada quando não há novidade, e o módulo 3 nunca recebe um CSV com metade dos perfis atualizados. |
 | D71 | O filtro SQL do perfil fica só com o que define o mercado do produto (atividade e situação); porte e capital viram critério do LLM. `amenities_hotel` v4 sem `capital_social_min` e `excluir_mei`. | Corte fixo de capital eliminava os hotéis de rede (capital de R$ 4.600 a R$ 50.000 em 2026-09). Com ~1.400 hospedagens por mês, o LLM em todas custa cerca de US$ 0,20. A atividade continua obrigatória (D57): sem ela, o mês inteiro iria ao LLM. |
 | D72 | Perfis montados pelo agente a partir da descrição do produto, guardados no banco do agente (`perfil_cliente`), com prévia, teto por produto e classificação online na hora; `perfis/*.yaml` vira opcional e o de hotelaria vira exemplo. | Pedido do usuário: o cliente explica o que vende. O agente valida o que o modelo propôs contra a tabela oficial de CNAEs, e o teto mantém o custo previsível. |
+| D75 | Cadastro de quem passou no funil guardado no banco do agente; CSV do CRM com janela de leads (`AGENTE_JANELA_LEADS_DIAS`). | O módulo 1 passou a guardar só o mês atual (D75 do módulo 1); sem o cadastro guardado, os leads dos meses anteriores sumiriam do CRM. A janela tira empresas que já não são recém-abertas. |

@@ -85,6 +85,16 @@ _MIGRACOES: list[str] = [
     );
     CREATE INDEX IF NOT EXISTS ix_perfil_cliente_dono ON perfil_cliente (dono, ativo);
     """,
+    # 3: dados cadastrais e contato da Receita de quem passou no funil. O módulo 1 guarda só o arquivo do mês
+    # atual; o CSV do CRM continua tendo os leads dos meses anteriores a partir daqui.
+    """
+    CREATE TABLE IF NOT EXISTS empresa_cadastro (
+        cnpj TEXT PRIMARY KEY,
+        mes_referencia TEXT NOT NULL,
+        dados_json TEXT NOT NULL,
+        atualizado_em TEXT NOT NULL
+    );
+    """,
 ]
 ESTADOS_ABERTOS = ("criando", "enviado")
 
@@ -226,6 +236,27 @@ class ClassificacaoStore:
     def perfis_classificados(self) -> list[str]:
         with self.conexao() as con:
             return [r[0] for r in con.execute("SELECT DISTINCT perfil_id FROM classificacao ORDER BY 1")]
+
+    # ---------------------------------------------------------------- cadastro (para o CSV do CRM)
+    def gravar_cadastro(self, mes: str, dados: dict[str, dict[str, Any]]) -> None:
+        agora = _agora()
+        with self.conexao() as con:
+            con.executemany(
+                """INSERT INTO empresa_cadastro (cnpj, mes_referencia, dados_json, atualizado_em) VALUES (?, ?, ?, ?)
+                   ON CONFLICT (cnpj) DO UPDATE SET mes_referencia = excluded.mes_referencia,
+                     dados_json = excluded.dados_json, atualizado_em = excluded.atualizado_em
+                   WHERE excluded.mes_referencia >= empresa_cadastro.mes_referencia""",
+                [(cnpj, mes, json.dumps(d, ensure_ascii=False, default=str), agora) for cnpj, d in dados.items()])
+
+    def cadastro(self, cnpjs: list[str]) -> dict[str, dict[str, Any]]:
+        resultado: dict[str, dict[str, Any]] = {}
+        with self.conexao() as con:
+            for i in range(0, len(cnpjs), 900):
+                lote = cnpjs[i:i + 900]
+                for r in con.execute(f"SELECT cnpj, dados_json FROM empresa_cadastro WHERE cnpj IN ({','.join('?' * len(lote))})",
+                                     lote):
+                    resultado[r["cnpj"]] = json.loads(r["dados_json"])
+        return resultado
 
     # ---------------------------------------------------------------- perfis das empresas clientes
     def salvar_perfil_cliente(self, perfil_id: str, dono: str, descricao: str, versao: int,

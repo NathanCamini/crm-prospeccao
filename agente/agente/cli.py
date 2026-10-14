@@ -246,11 +246,14 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
             store = banco()
             nomes = catalogo.rotulos(cfg, store)  # padrão: só os perfis ativos (perfil desativado sai do CSV)
             perfis = args.perfil or sorted(set(store.perfis_classificados()) & set(nomes))
-            r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, perfis, args.mes, nomes=nomes)
+            r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, perfis, args.mes, nomes=nomes,
+                             janela_dias=cfg.janela_leads_dias)
             print(f"{r.linhas} empresas ({r.alvos} alvos) de {', '.join(r.perfis)} · meses {', '.join(r.meses)} "
                   f"→ {saida}")
             for mes, n in r.puladas.items():
-                print(f"  atenção: {n} classificações de {mes} ficaram fora (arquivo do mês ausente ou alterado)")
+                print(f"  atenção: {n} classificações de {mes} ficaram fora (sem cadastro guardado)")
+            if r.fora_da_janela:
+                print(f"  {r.fora_da_janela} empresas abertas há mais de {cfg.janela_leads_dias} dias ficaram fora")
             print("O módulo 3 relê o CSV sozinho; o CRM copia os leads na próxima sincronização.")
             return 0
     except (ContratoInvalidoError, PerfilInvalidoError, FunilGrandeError, RuntimeError, ValueError) as exc:

@@ -16,7 +16,8 @@ MES = "2026-09"
 
 
 def config_teste(pasta: Path) -> Config:
-    return Config(data_dir=pasta, duckdb_memory_limit="512MB", duckdb_threads=2, apagar_csv_extraido=False)
+    return Config(data_dir=pasta, duckdb_memory_limit="512MB", duckdb_threads=2, apagar_csv_extraido=False,
+                  manter_arquivos_carga=True)  # os testes leem os zips e a silver depois da carga
 
 
 @pytest.fixture(scope="session")

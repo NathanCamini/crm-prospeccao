@@ -81,7 +81,7 @@ O `.env` fica na raiz do projeto e **nunca** vai para o git (já está no `.giti
 | `DUCKDB_MAX_TEMP` | `20GB` | Teto de disco temporário; se estourar, a carga para com mensagem em vez de lotar o disco | Aumente se a carga falhar por esse limite e houver disco |
 | `ESPACO_MINIMO_GB` | `50` | A carga real nem começa com menos espaço livre | Diminua só se souber o que está fazendo |
 | `APAGAR_CSV_EXTRAIDO` | `true` | Apaga os CSVs extraídos (~25 GB) no fim; os zips ficam | `false` só para depuração |
-| `MESES_MANTIDOS` | `2` | Meses de zips e silver mantidos; os mais antigos são apagados | `0` mantém tudo |
+| `MANTER_ARQUIVOS_CARGA` | `false` | Zips e silver apagados depois de cada carga bem-sucedida | `true` mantém os do mês carregado |
 | `JANELA_NOVA_DIAS` | `90` | Janela da marcação `is_nova` gravada na base | Raramente; a interface escolhe o período livremente |
 | `CACHE_BUSCA_DIAS` | `90` | Não repete busca de contato da mesma empresa nesse período | Conforme o uso |
 | `SITE_INTERVALO_SEGUNDOS` | `2` | Intervalo mínimo entre acessos ao mesmo site | Não diminua (boa conduta) |

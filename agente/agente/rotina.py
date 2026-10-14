@@ -20,16 +20,17 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+from agente import catalogo
 from agente.armazenamento import ClassificacaoStore
+from agente.avaliacao import gravar_csv
 from agente.config import AgenteConfig
 from agente.contrato import NOME_MANIFESTO, ContratoInvalidoError, validar_mes
-from agente.avaliacao import gravar_csv
 from agente.exportacao import ARQUIVO_CRM, COLUNAS_CRM, exportar_crm
 from agente.funil import FunilGrandeError
-from agente import catalogo
 from agente.perfil import PerfilInvalidoError
 from agente.servico import Classificador
 
@@ -68,11 +69,12 @@ def ultimo_mes(novas_dir: Path) -> str | None:
     return meses[-1] if meses else None
 
 
-def _assinatura(store: ClassificacaoStore, nomes: dict[str, str]) -> list[Any]:
-    """Muda quando uma classificação é gravada ou refeita, ou quando um perfil entra, sai ou muda de nome."""
+def _assinatura(store: ClassificacaoStore, nomes: dict[str, str], janela_dias: int) -> list[Any]:
+    """Muda quando uma classificação é gravada ou refeita, quando um perfil entra, sai ou muda de nome e,
+    com janela de leads, a cada dia (as empresas mais antigas saem do CSV)."""
     with store.conexao() as con:
         return [*con.execute("SELECT count(*), max(classificado_em) FROM classificacao").fetchone(),
-                dict(sorted(nomes.items()))]
+                dict(sorted(nomes.items())), date.today().isoformat() if janela_dias > 0 else None]
 
 
 def _estado(cfg: AgenteConfig) -> Path:
@@ -116,7 +118,7 @@ def executar_rotina(cfg: AgenteConfig, store: ClassificacaoStore, classificador:
 def exportar_se_mudou(cfg: AgenteConfig, store: ClassificacaoStore) -> str | None:
     """Grava o CSV do módulo 3 com os perfis ativos, se algo mudou desde a última exportação."""
     nomes = catalogo.rotulos(cfg, store)
-    assinatura = _assinatura(store, nomes)
+    assinatura = _assinatura(store, nomes, cfg.janela_leads_dias)
     classificados = set(store.perfis_classificados()) & set(nomes)
     saida = cfg.saida_dir / ARQUIVO_CRM
     try:
@@ -131,10 +133,16 @@ def exportar_se_mudou(cfg: AgenteConfig, store: ClassificacaoStore) -> str | Non
         gravar_csv(saida, [], COLUNAS_CRM)  # o último perfil ativo saiu: o módulo 3 deixa de entregar os leads dele
         _estado(cfg).write_text(json.dumps({"exportado": assinatura}), encoding="utf-8")
         return f"{saida} (nenhum perfil ativo classificado)"
-    r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, sorted(classificados), nomes=nomes)
+    try:
+        r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, sorted(classificados), nomes=nomes,
+                         janela_dias=cfg.janela_leads_dias)
+    except ValueError:  # nenhum lead dentro da janela: o CSV fica só com o cabeçalho
+        gravar_csv(saida, [], COLUNAS_CRM)
+        _estado(cfg).write_text(json.dumps({"exportado": assinatura}), encoding="utf-8")
+        return f"{saida} (nenhum lead dentro da janela de {cfg.janela_leads_dias} dias)"
     _estado(cfg).write_text(json.dumps({"exportado": assinatura}), encoding="utf-8")
     for mes, n in r.puladas.items():
-        log.warning("%d classificações de %s ficaram fora do CSV (arquivo do mês ausente ou alterado)", n, mes)
+        log.warning("%d classificações de %s ficaram fora do CSV (sem cadastro guardado)", n, mes)
     return f"{saida} ({r.linhas} empresas, {r.alvos} alvos)"
 
 

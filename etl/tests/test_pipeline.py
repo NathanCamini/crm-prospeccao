@@ -113,8 +113,7 @@ def test_nova_carga_preserva_historico(tmp_path) -> None:
         meses = [r[0] for r in con.execute("SELECT mes_referencia FROM carga ORDER BY data_ingestao, mes_referencia").fetchall()]
         assert sorted(meses) == ["2026-08", "2026-09"]
         assert con.execute("SELECT count(*) FROM carga WHERE contagens IS NULL").fetchone()[0] == 0
-    assert not (cfg.bronze_dir / MES / "csv").exists()  # CSV extraído apagado; zips mantidos
-    assert any((cfg.bronze_dir / MES / "zip").glob("*.zip"))
+    assert not (cfg.bronze_dir / MES).exists()  # carga concluída: zips e CSV apagados (a Receita republica tudo)
 
 
 def test_carga_recusa_comecar_sem_espaco_em_disco(tmp_path) -> None:

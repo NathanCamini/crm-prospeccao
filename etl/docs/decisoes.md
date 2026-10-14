@@ -223,6 +223,14 @@ O agente saiu deste módulo e virou o módulo 2, em `agente/` na raiz do reposit
 - `contato_compartilhado` conta os CNPJs da base inteira, mas só para os contatos que aparecem nas novas; assim não varre 70 milhões de contatos à toa. Telefone é comparado só com os dígitos; o arquivo leva o contato original.
 - Roda no fim da carga, antes da limpeza de meses antigos. Se falhar, a base continua publicada e o erro vai para o resumo.
 
+## 2026-10-14 · Só o mês atual
+
+### D75. Empresa nova pelo corte da carga anterior; zips, silver e meses anteriores apagados (substitui a comparação da D65)
+- Cada mês a Receita publica a base inteira de novo; guardar o mês anterior só servia para comparar. Agora empresa nova é a aberta depois do corte da carga anterior. O corte é a maior data de abertura da base, ≈ data da extração. O único estado guardado é essa data (`exportacoes/novas/_ultimo_corte.json`).
+- Folga de `NOVAS_FOLGA_DIAS` (15) para trás, para cadastros que entram atrasados. Repetidas entre meses não custam nada no agente, que não reclassifica o que não mudou. Primeira carga: últimos `NOVAS_PRIMEIRA_JANELA_DIAS` (60).
+- Depois de uma carga bem-sucedida, zips e silver são apagados (`MANTER_ARQUIVOS_CARGA=false`), e o arquivo de empresas novas dos meses anteriores também. Fica só a gold. Disco parado: ~8 GB em vez de ~35 GB.
+- Substitui `MESES_MANTIDOS` (D29).
+
 ## Pontos em aberto da seção 12 (opção mais simples)
 
 | # | Ponto | Escolha |

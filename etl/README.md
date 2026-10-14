@@ -82,7 +82,7 @@ Recursos para a base real:
 |---|---|
 | Disco | ~50 GB livres durante a carga: ~7 GB de zips, ~25 GB de CSV temporário (apagado ao final), Parquet e DuckDB. A carga não começa abaixo de `ESPACO_MINIMO_GB` |
 | Memória | `DUCKDB_MEMORY_LIMIT` em torno de 50% da RAM; o excesso vai para `data/tmp/`, até `DUCKDB_MAX_TEMP` |
-| Meses antigos | Zips e silver além dos `MESES_MANTIDOS` mais recentes são apagados automaticamente |
+| Depois da carga | Zips e silver são apagados (a Receita republica a base inteira todo mês); fica só a gold, ~8 GB. `MANTER_ARQUIVOS_CARGA=true` mantém os do mês carregado. Numa falha nada é apagado e a carga pode ser retomada |
 
 ## Agendamento
 
@@ -148,8 +148,12 @@ O agente classificador fica em [`../agente`](../agente/README.md). Ele lê desta
 
 **O arquivo do mês sai no fim de cada carga** (`EXPORTAR_NOVAS=true`, padrão). Para gerar de novo: `prospeccao exportar-novas`.
 
-- **Empresa nova** é o estabelecimento que está na base do mês e não estava na silver do mês anterior. Por isso mantenha `MESES_MANTIDOS` em 2 ou mais.
-- Na primeira carga não há mês anterior: entram as aberturas a partir do dia 1 do mês anterior ao da carga (ou de `--desde`). O critério usado fica no manifesto.
+- **Nada do mês passado é guardado.** Cada mês a Receita publica todos os CNPJs do Brasil de novo, e daí saem as empresas novas.
+- **Empresa nova** é a aberta depois do corte da carga anterior. O corte é a data de abertura mais recente da base, ≈ o dia em que a Receita extraiu os dados; o único estado guardado é essa data, em `exportacoes/novas/_ultimo_corte.json`.
+- **Folga.** Volta `NOVAS_FOLGA_DIAS` (15) para trás, para cadastros que entram atrasados na base. Quem cai nos dois meses não custa nada a mais: o agente não reclassifica o que não mudou.
+- **Primeira carga** (sem corte anterior): as aberturas dos últimos `NOVAS_PRIMEIRA_JANELA_DIAS` (60). Também dá para forçar a data com `--desde`.
+- O critério usado e o corte ficam no manifesto.
+- Só o arquivo do mês atual fica em `exportacoes/novas/`: os dos meses anteriores são apagados. O agente guarda no próprio banco o cadastro das empresas que passaram no filtro, então os leads dos meses anteriores continuam no CRM.
 - Vão junto as três marcações que o agente usa como sinal: `contato_compartilhado` (o mesmo e-mail ou telefone em mais de 5 CNPJs da base, em geral a contabilidade), `filial_de_empresa_existente` e `pessoa_fisica_identificavel` (empresário individual, MEI ou natureza de pessoa física).
 - O Parquet é gravado num temporário e renomeado, e o manifesto vem por último com o SHA-256: o agente nunca lê um arquivo pela metade.
 - Uma falha nesta etapa não desfaz a carga: fica no log e no resumo (`empresas_novas.erro`).

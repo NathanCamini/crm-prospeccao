@@ -124,6 +124,7 @@ services:
       AGENTE_GOLD_DB: /modulo1/gold/empresas.duckdb   # sinal de sócio holding; sem o arquivo, segue sem ele
       AGENTE_DADOS_DIR: /dados
       AGENTE_SAIDA_DIR: /saida
+      AGENTE_JANELA_LEADS_DIAS: ${AGENTE_JANELA_LEADS_DIAS:-180}   # leads no CRM: abertas há no máximo N dias
     volumes: &agente_volumes
       - ${MODULO1_DADOS:-./etl/data}:/modulo1:ro         # pasta data/ do módulo 1
       - ./agente/perfis:/app/perfis:ro                  # editar um perfil não exige rebuild

@@ -14,7 +14,7 @@ import duckdb
 import pytest
 
 from prospeccao.config import Config
-from prospeccao.transform.novas import ExportacaoNovasError, exportar_novas, mes_anterior, pasta_novas
+from prospeccao.transform.novas import ExportacaoNovasError, exportar_novas, pasta_novas
 from tests.conftest import MES
 
 SCHEMA = Path(__file__).resolve().parents[2] / "agente" / "schema" / "empresas_novas.v1.json"
@@ -43,18 +43,6 @@ def _ler(cfg: Config, mes: str = MES) -> dict[str, dict]:
         return {linha[0]: dict(zip(nomes, linha)) for linha in cur.fetchall()}
 
 
-def _silver_anterior(cfg: Config, sem: set[str]) -> None:
-    """Silver do mês anterior com todos os estabelecimentos de hoje, menos os de `sem`."""
-    destino = cfg.silver_dir / mes_anterior(MES) / "estabelecimentos" / "balde=0"
-    destino.mkdir(parents=True)
-    origem = (cfg.silver_dir / MES / "estabelecimentos").as_posix() + "/*/*.parquet"
-    lista = ", ".join(f"'{c}'" for c in sem)
-    with duckdb.connect() as con:
-        con.execute(f"""COPY (SELECT * FROM read_parquet('{origem}', hive_partitioning=false)
-                              WHERE cnpj NOT IN ({lista}))
-                        TO '{(destino / 'dados.parquet').as_posix()}' (FORMAT parquet)""")
-
-
 def test_carga_ja_grava_o_arquivo_do_mes(carga_amostra: tuple[Config, dict]) -> None:
     cfg, resumo = carga_amostra
     assert resumo["empresas_novas"]["total"] == 4
@@ -65,14 +53,17 @@ def test_carga_ja_grava_o_arquivo_do_mes(carga_amostra: tuple[Config, dict]) -> 
     assert not list(pasta_novas(cfg, MES).glob("*.tmp"))
 
 
-def test_sem_mes_anterior_usa_a_data_de_abertura(carga_amostra: tuple[Config, dict]) -> None:
+def test_primeira_carga_usa_os_ultimos_60_dias(carga_amostra: tuple[Config, dict]) -> None:
     cfg, _ = carga_amostra
     linhas = _ler(cfg)
-    # desde 01/08: entram as de 10, 5 e 30 dias e a de hoje; ficam fora a de 90/91 dias e a com data futura
+    # corte = 09/10 (abertura mais recente); desde 10/08: entram as de 10, 5 e 30 dias e a de hoje;
+    # ficam fora a de 90/91 dias e a com data futura
     assert {c[:8] for c in linhas} == {"00012345", "44555666", "77888999", "A1B2C3D4"}
     assert linhas["00012345000165"]["matriz_filial"] == "MATRIZ"
     manifesto = json.loads((pasta_novas(cfg, MES) / "_manifest.json").read_text(encoding="utf-8"))
-    assert manifesto["criterio"] == "abertura a partir de 2026-08-01"
+    assert manifesto["criterio"] == "abertura de 2026-08-10 a 2026-10-09 (sem corte anterior: últimos 60 dias)"
+    corte = json.loads((cfg.data_dir / "exportacoes" / "novas" / "_ultimo_corte.json").read_text(encoding="utf-8"))
+    assert corte == {"mes": MES, "corte": "2026-10-09"}
 
 
 def test_contato_original_e_marcacoes(carga_amostra: tuple[Config, dict]) -> None:
@@ -113,17 +104,24 @@ def test_validado_pelo_proprio_agente(carga_amostra: tuple[Config, dict]) -> Non
     assert arquivo.tem("contato_compartilhado") and arquivo.tem("filial_de_empresa_existente")
 
 
-def test_com_mes_anterior_compara_com_a_silver(cfg_copia: Config) -> None:
-    with duckdb.connect(str(cfg_copia.gold_db), read_only=True) as con:
-        tech = con.execute("SELECT cnpj FROM empresa WHERE cnpj LIKE 'A1B2C3D4%'").fetchone()[0]
-    filial = "00012345000246"
-    _silver_anterior(cfg_copia, {filial, tech})
+def test_com_corte_anterior_pega_desde_ele_com_folga(cfg_copia: Config) -> None:
+    novas = cfg_copia.data_dir / "exportacoes" / "novas"
+    (novas / "2026-08").mkdir(parents=True)                       # arquivo do mês passado: sai
+    (novas / "_ultimo_corte.json").write_text('{"mes": "2026-08", "corte": "2026-09-30"}', encoding="utf-8")
     r = exportar_novas(cfg_copia)
-    assert r["criterio"] == f"ausente na silver de {mes_anterior(MES)}"
+    assert r["criterio"] == "abertura de 2026-09-15 a 2026-10-09 (corte anterior 2026-09-30, folga de 15 dias)"
+    assert {c[:8] for c in _ler(cfg_copia)} == {"00012345", "44555666", "A1B2C3D4"}  # a de 30 dias já veio antes
+    assert sorted(p.name for p in novas.iterdir()) == [MES, "_ultimo_corte.json"]
+
+
+def test_filial_de_empresa_que_ja_existia(cfg_copia: Config) -> None:
+    with duckdb.connect(str(cfg_copia.gold_db)) as con:  # outro estabelecimento da ALFA OBRAS, aberto em 2000
+        con.execute("""INSERT INTO empresa SELECT * REPLACE ('00012345000300' AS cnpj, DATE '2000-01-01' AS data_inicio_atividade)
+                       FROM empresa WHERE cnpj = '00012345000165'""")
+    exportar_novas(cfg_copia, desde=date(2026, 7, 1))
     linhas = _ler(cfg_copia)
-    assert set(linhas) == {filial, tech}                         # aberta há 90 dias, mas só agora apareceu
-    assert linhas[filial]["filial_de_empresa_existente"] is True  # a matriz já estava no mês anterior
-    assert linhas[tech]["filial_de_empresa_existente"] is None
+    assert linhas["00012345000246"]["filial_de_empresa_existente"] is True   # filial nova de empresa antiga
+    assert linhas["00012345000165"]["filial_de_empresa_existente"] is None   # matriz: não se aplica
 
 
 def test_contato_compartilhado(cfg_copia: Config) -> None:
@@ -147,7 +145,7 @@ def test_recusa_mes_diferente_da_base(cfg_copia: Config) -> None:
 def test_desde_explicito(cfg_copia: Config) -> None:
     r = exportar_novas(cfg_copia, desde=date(2026, 10, 1))
     assert r["total_linhas"] == 2  # a de hoje e a de 5 dias
-    assert r["criterio"] == "abertura a partir de 2026-10-01"
+    assert r["criterio"] == "abertura de 2026-10-01 a 2026-10-09 (informado)"
 
 
 def test_sem_base(cfg_vazio: Config) -> None:

@@ -3,9 +3,14 @@
 Grava `data/exportacoes/novas/AAAA-MM/empresas_novas.parquet` e `_manifest.json` no
 formato de `agente/schema/empresas_novas.v1.json`:
 
-- **Empresa nova** é o estabelecimento que está na gold do mês e não estava na silver do
-  mês anterior. Na primeira carga não há mês anterior: valem as aberturas a partir do
-  primeiro dia do mês anterior ao da carga (ou de `desde`). O critério usado vai no manifesto.
+- **Empresa nova** é a aberta depois do corte da carga anterior. Cada mês a Receita publica a
+  base inteira de novo; nada do mês passado é guardado, só a data do corte (`_ultimo_corte.json`).
+  O corte é a data de abertura mais recente da base (≈ o dia em que a Receita extraiu os dados).
+  Há uma folga de `novas_folga_dias` para trás, para cadastros que entram atrasados; quem aparece
+  nos dois meses não custa nada a mais no agente, que não reclassifica o que não mudou. Sem corte
+  anterior (primeira carga), valem as aberturas dos últimos `novas_primeira_janela_dias`. O
+  critério usado vai no manifesto.
+- Só o arquivo do mês atual fica em `exportacoes/novas/`: os dos meses anteriores são apagados.
 - As três marcações opcionais do contrato saem junto: `contato_compartilhado`,
   `filial_de_empresa_existente` e `pessoa_fisica_identificavel`.
 - O Parquet é gravado num temporário e renomeado; o manifesto vem por último. O agente
@@ -18,7 +23,8 @@ import hashlib
 import json
 import logging
 import os
-from datetime import date, datetime
+import shutil
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -31,6 +37,7 @@ log = logging.getLogger("prospeccao.novas")
 VERSAO_SCHEMA = 1
 NOME_PARQUET = "empresas_novas.parquet"
 NOME_MANIFESTO = "_manifest.json"
+NOME_ESTADO = "_ultimo_corte.json"
 # Acima de tantos CNPJs com o mesmo e-mail ou telefone, o contato é de terceiro (em geral a contabilidade).
 LIMITE_CONTATO_COMPARTILHADO = 5
 # Naturezas jurídicas cuja razão social traz o nome do titular: empresário individual e pessoas físicas (4xxx).
@@ -50,11 +57,6 @@ class ExportacaoNovasError(ValueError):
     """Não há base para exportar ou ela é de outro mês."""
 
 
-def mes_anterior(mes: str) -> str:
-    ano, m = int(mes[:4]), int(mes[5:7])
-    return f"{ano - 1}-12" if m == 1 else f"{ano}-{m - 1:02d}"
-
-
 def pasta_novas(cfg: Config, mes: str) -> Path:
     return cfg.data_dir / "exportacoes" / "novas" / mes
 
@@ -67,11 +69,30 @@ def _sha256(caminho: Path) -> str:
     return resumo.hexdigest()
 
 
-def _silver_anterior(cfg: Config, mes: str) -> str | None:
-    pasta = cfg.silver_dir / mes_anterior(mes) / "estabelecimentos"
-    if not any(pasta.glob("*/*.parquet")):
+def _ler_corte_anterior(cfg: Config) -> date | None:
+    try:
+        return date.fromisoformat(json.loads((cfg.data_dir / "exportacoes" / "novas" / NOME_ESTADO)
+                                             .read_text(encoding="utf-8"))["corte"])
+    except (OSError, ValueError, KeyError):
         return None
-    return pasta.as_posix() + "/*/*.parquet"
+
+
+def _gravar_corte(cfg: Config, mes: str, corte: date) -> None:
+    caminho = cfg.data_dir / "exportacoes" / "novas" / NOME_ESTADO
+    tmp = caminho.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"mes": mes, "corte": corte.isoformat()}), encoding="utf-8")
+    os.replace(tmp, caminho)
+
+
+def apagar_meses_anteriores(cfg: Config, mes: str) -> list[str]:
+    """Deixa em exportacoes/novas/ só o arquivo do mês atual."""
+    raiz = cfg.data_dir / "exportacoes" / "novas"
+    removidos = []
+    for pasta in sorted(raiz.glob("????-??")) if raiz.exists() else []:
+        if pasta.is_dir() and pasta.name != mes:
+            shutil.rmtree(pasta)
+            removidos.append(pasta.name)
+    return removidos
 
 
 def _contato(ddd: str, tel: str) -> str:
@@ -97,37 +118,44 @@ def exportar_novas(cfg: Config, mes: str | None = None, desde: date | None = Non
                 f"A base carregada é de {mes_base}, não de {mes}. Carregue {mes} antes de exportar as novas dele.")
         mes = mes_base
 
-        anterior = _silver_anterior(cfg, mes)
-        if anterior and desde is None:
-            criterio = f"ausente na silver de {mes_anterior(mes)}"
-            con.execute(f"CREATE TEMP TABLE anterior AS SELECT DISTINCT cnpj, cnpj_basico FROM read_parquet('{anterior}')")
-            con.execute(f"""CREATE TEMP TABLE novas AS
-                SELECT {_COLUNAS},
-                       CASE WHEN e.matriz_filial = 'FILIAL'
-                            THEN e.cnpj_basico IN (SELECT cnpj_basico FROM anterior) END AS filial_de_empresa_existente
-                FROM g.empresa e ANTI JOIN anterior a ON a.cnpj = e.cnpj""")
+        # Corte desta base: a abertura mais recente (data futura é erro da fonte e fica fora, como na is_nova).
+        corte = con.execute("SELECT max(data_inicio_atividade) FROM g.empresa WHERE data_inicio_atividade <= $ref",
+                            {"ref": data_ref or date.today()}).fetchone()[0]
+        if corte is None:
+            raise ExportacaoNovasError("A base não tem datas de abertura.")
+        if desde is None:
+            anterior = _ler_corte_anterior(cfg)
+            if anterior is not None and anterior < corte:
+                desde = anterior - timedelta(days=cfg.novas_folga_dias)
+                criterio = (f"abertura de {desde.isoformat()} a {corte.isoformat()} (corte anterior {anterior.isoformat()}, "
+                            f"folga de {cfg.novas_folga_dias} dias)")
+            else:
+                desde = corte - timedelta(days=cfg.novas_primeira_janela_dias)
+                criterio = (f"abertura de {desde.isoformat()} a {corte.isoformat()} "
+                            f"(sem corte anterior: últimos {cfg.novas_primeira_janela_dias} dias)")
         else:
-            desde = desde or date.fromisoformat(mes_anterior(mes) + "-01")
-            criterio = f"abertura a partir de {desde.isoformat()}"
-            if not anterior:
-                log.warning("Sem a silver de %s: empresas novas pela data de abertura (%s).", mes_anterior(mes), criterio)
-            # Sem o mês anterior, "já existia" vira: outro estabelecimento do mesmo CNPJ básico aberto antes de `desde`.
-            con.execute(f"""CREATE TEMP TABLE novas AS
-                SELECT {_COLUNAS},
-                       CASE WHEN e.matriz_filial = 'FILIAL' THEN EXISTS (
-                           SELECT 1 FROM g.empresa o
-                           WHERE o.cnpj_basico = e.cnpj_basico AND o.cnpj <> e.cnpj
-                             AND o.data_inicio_atividade < $desde) END AS filial_de_empresa_existente
-                FROM g.empresa e
-                WHERE e.data_inicio_atividade >= $desde
-                  AND e.data_inicio_atividade <= coalesce($ref, current_date)""",
-                        {"desde": desde, "ref": data_ref})
+            criterio = f"abertura de {desde.isoformat()} a {corte.isoformat()} (informado)"
+        # "Já existia": outro estabelecimento do mesmo CNPJ básico aberto antes da janela.
+        con.execute(f"""CREATE TEMP TABLE novas AS
+            SELECT {_COLUNAS},
+                   CASE WHEN e.matriz_filial = 'FILIAL' THEN EXISTS (
+                       SELECT 1 FROM g.empresa o
+                       WHERE o.cnpj_basico = e.cnpj_basico AND o.cnpj <> e.cnpj
+                         AND o.data_inicio_atividade < $desde) END AS filial_de_empresa_existente
+            FROM g.empresa e
+            WHERE e.data_inicio_atividade >= $desde AND e.data_inicio_atividade <= $corte""",
+                    {"desde": desde, "corte": corte})
 
         _marcar_contato_compartilhado(con)
         destino = pasta_novas(cfg, mes)
         manifesto = _gravar(con, destino, mes, criterio)
+        manifesto["corte"] = corte.isoformat()
+        _gravar_corte(cfg, mes, corte)
+        apagados = apagar_meses_anteriores(cfg, mes)
     finally:
         con.close()
+    if apagados:
+        log.info("Arquivos de empresas novas de meses anteriores apagados: %s", ", ".join(apagados))
     log.info("Empresas novas de %s: %d (%s) em %s", mes, manifesto["total_linhas"], criterio, destino)
     return {"mes": mes, "pasta": str(destino), **manifesto}
 

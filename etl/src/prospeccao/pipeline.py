@@ -139,7 +139,7 @@ def mes_carregado(cfg: Config) -> str | None:
 
 
 def limpar_meses_antigos(cfg: Config, manter: int) -> list[str]:
-    """Apaga bronze (zips) e silver de meses além dos `manter` mais recentes. A gold não é afetada."""
+    """Apaga bronze (zips) e silver de meses além dos `manter` mais recentes (0 = todos). A gold não é afetada."""
     removidos: list[str] = []
     for camada in (cfg.bronze_dir, cfg.silver_dir):
         if not camada.exists():
@@ -200,9 +200,10 @@ def _executar_carga(cfg: Config, mes: str | None, baixar: bool, data_referencia:
     publicar_gold(tmp_db, cfg.gold_db)
     if cfg.apagar_csv_extraido:
         apagar_csvs_extraidos(cfg, mes)
-    novas = _exportar_novas(cfg, mes)  # antes da limpeza: compara com a silver do mês anterior
-    if cfg.meses_mantidos > 0:
-        limpar_meses_antigos(cfg, cfg.meses_mantidos)
+    novas = _exportar_novas(cfg, mes)
+    # Cada mês a Receita publica a base inteira: depois de uma carga bem-sucedida, zips e silver não servem
+    # mais (a gold e o arquivo de empresas novas ficam). Numa falha, nada é apagado e a carga pode ser retomada.
+    limpar_meses_antigos(cfg, manter=1 if cfg.manter_arquivos_carga else 0)
 
     log.info("Carga %s concluída", mes)
     return {"mes_referencia": mes, "gold_db": str(cfg.gold_db), "contagens": contagens, "metricas": metricas,
