@@ -220,9 +220,25 @@ MIGRACOES: list[str] = [
         criado_por TEXT NOT NULL,
         criado_em TEXT NOT NULL,
         atualizado_em TEXT NOT NULL,
-        removido_em TEXT                            -- os leads já trabalhados continuam visíveis
+        removido_em TEXT,                           -- os leads já trabalhados continuam visíveis
+        execucao_sincronizada TEXT                  -- fim da classificação do agente já copiada para cá
     );
     CREATE INDEX produto_empresa ON produto(empresa_id);
+
+    -- Uma linha por lead × perfil: o mesmo CNPJ pode ser alvo do produto de duas empresas, e cada uma
+    -- vê o lead pela classificação dos perfis dela (pontuação e justificativa do próprio produto).
+    CREATE TABLE lead_perfil (
+        chave TEXT NOT NULL REFERENCES lead(chave) ON DELETE CASCADE,
+        perfil_id TEXT NOT NULL,
+        score INTEGER,
+        e_alvo INTEGER NOT NULL DEFAULT 1,
+        classificacao TEXT NOT NULL,                -- JSON, como veio do módulo 3
+        PRIMARY KEY (chave, perfil_id)
+    );
+    CREATE INDEX lead_perfil_perfil ON lead_perfil(perfil_id, chave);
+    INSERT INTO lead_perfil (chave, perfil_id, score, e_alvo, classificacao)
+        SELECT chave, perfil_id, score, e_alvo, json_extract(dados, '$.classificacao') FROM lead
+        WHERE origem = 'modulo3' AND perfil_id IS NOT NULL AND json_extract(dados, '$.classificacao') IS NOT NULL;
     """,
 ]
 

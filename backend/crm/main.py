@@ -13,7 +13,7 @@ from . import auditoria
 from .config import Config
 from .db import migrar
 from .modulo3 import Modulo3
-from .rotas import apoio, auth, clientes, equipe, leads, operacao
+from .rotas import apoio, auth, clientes, equipe, leads, operacao, produtos
 from .sincronizacao import sincronizar_periodicamente
 
 METODOS_SEGUROS = {"GET", "HEAD", "OPTIONS"}
@@ -76,4 +76,5 @@ def criar_app(cfg: Config | None = None, m3: Modulo3 | None = None) -> FastAPI:
     app.include_router(equipe.router)
     app.include_router(clientes.router)
     app.include_router(operacao.router)
+    app.include_router(produtos.router)
     return app

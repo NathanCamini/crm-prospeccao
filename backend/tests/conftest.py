@@ -49,6 +49,19 @@ LEADS = [
 
 def modulo3_falso(registro: list) -> FastAPI:
     app = FastAPI()
+    # Produtos descritos pelas empresas: salvar um produto "classifica" HOTEL UM (que já é alvo de amenities_hotel)
+    # e uma academia que só existe para esse produto, como o agente faria.
+    produtos: dict[str, dict] = {}
+    extras: dict[str, list[dict]] = {}
+    so_do_produto: list[dict] = []
+
+    def montar(lead: dict) -> dict:
+        todas = [lead["classificacao"], *extras.get(lead["cnpj"], [])]
+        melhor = max(todas, key=lambda c: (c["e_alvo"], c["score"]))
+        return dict(lead, contatos=list(lead["contatos"]), classificacao=melhor, classificacoes=todas)
+
+    def todos() -> list[dict]:
+        return [montar(l) for l in [*LEADS, *so_do_produto]]
 
     @app.get("/saude")
     def saude():
@@ -62,7 +75,7 @@ def modulo3_falso(registro: list) -> FastAPI:
     @app.post("/v1/leads/busca")
     def busca(f: dict):
         registro.append(f)
-        itens = [dict(l, contatos=list(l["contatos"])) for l in LEADS]
+        itens = todos()
         if f.get("perfil_id"):
             itens = [i for i in itens if i["classificacao"]["perfil_id"] == f["perfil_id"]]
         if f.get("perfis"):
@@ -81,14 +94,52 @@ def modulo3_falso(registro: list) -> FastAPI:
 
     @app.get("/v1/leads/{cnpj}")
     def lead(cnpj: str):
-        for l in LEADS:
+        for l in todos():
             if l["cnpj"] == cnpj:
                 return l
         raise HTTPException(404, "Empresa não encontrada no módulo 3.")
 
     @app.post("/v1/perguntar")
     def perguntar(p: dict):
+        registro.append({"pergunta": p})
         return {"resposta": f"eco: {p['pergunta']} ({p.get('cnpj')})", "fonte": "simulado"}
+
+    @app.post("/v1/produtos/sugerir")
+    def sugerir(c: dict):
+        if "vago" in c["descricao"]:
+            raise HTTPException(422, "Diga para quem você vende.")
+        return {"perfil": {"nome": "Sistema para academias", "produto": "Sistema de gestão",
+                           "filtro_sql": {"cnaes": ["9313100"]}, "criterios_llm": ["É academia?"]},
+                "explicacao": "Vou buscar academias.", "atividades": [{"codigo": "9313100", "descricao": "Academias"}],
+                "previa": {"mes": "2026-09", "total": 2, "limite": 1500, "cabe": True, "exemplos": []}}
+
+    @app.post("/v1/produtos", status_code=202)
+    def salvar(c: dict):
+        perfil_id = c.get("perfil_id") or f"c{c['dono']}_academias_{len(produtos) + 1}"
+        versao = produtos[perfil_id]["versao"] + 1 if perfil_id in produtos else 1
+        produtos[perfil_id] = {"id": perfil_id, "dono": c["dono"], "nome": c["perfil"]["nome"], "versao": versao,
+                               "descricao": c["descricao"], "alvos": 2, "filtro": c["perfil"]["filtro_sql"],
+                               "criterios": c["perfil"]["criterios_llm"],
+                               "execucao": {"situacao": "pronto", "fim": f"2026-10-14T12:00:0{versao}"}}
+        cls = {"perfil_id": perfil_id, "score": 95, "e_alvo": True, "justificativa": "academia dentro do hotel",
+               "produto_sugerido": "Sistema de gestão"}
+        extras["11111111000191"] = [cls]
+        so_do_produto[:] = [_lead("55555555000191", "ACADEMIA CINCO", "RS", 0, "oi@cinco.test", None, perfil=perfil_id)]
+        so_do_produto[0]["classificacao"] = dict(cls, justificativa="academia nova")
+        return produtos[perfil_id]
+
+    @app.get("/v1/produtos")
+    def listar(dono: str):
+        return [p for p in produtos.values() if p["dono"] == dono]
+
+    @app.delete("/v1/produtos/{perfil_id}")
+    def remover(perfil_id: str, dono: str):
+        if produtos.get(perfil_id, {}).get("dono") != dono:
+            raise HTTPException(404, "Produto não encontrado.")
+        del produtos[perfil_id]
+        extras.clear()
+        so_do_produto.clear()
+        return {"ok": True}
 
     return app
 

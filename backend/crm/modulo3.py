@@ -24,6 +24,8 @@ class Modulo3:
             raise HTTPException(503, "O módulo 3 está fora do ar. Confira se o serviço está rodando.") from erro
         if resp.status_code == 404:
             raise HTTPException(404, _detalhe(resp) or "Não encontrado no módulo 3.")
+        if resp.status_code in (422, 503):  # descrição vaga, teto de custo, agente sem chave: o motivo vai à tela
+            raise HTTPException(resp.status_code, _detalhe(resp) or f"O módulo 3 respondeu com erro {resp.status_code}.")
         if resp.status_code >= 400:
             raise HTTPException(502, _detalhe(resp) or f"O módulo 3 respondeu com erro {resp.status_code}.")
         return resp.json()
@@ -50,12 +52,28 @@ class Modulo3:
     def lead(self, cnpj: str) -> dict:
         return self._chamar("GET", f"/v1/leads/{cnpj}")
 
-    def perguntar(self, pergunta: str, cnpj: str | None, contexto: dict | None = None) -> dict:
-        """`contexto` leva os dados de um lead que o módulo 3 não conhece (cadastro manual)."""
-        corpo: dict = {"pergunta": pergunta, "cnpj": cnpj}
+    def perguntar(self, pergunta: str, cnpj: str | None, contexto: dict | None = None,
+                  perfis: list[str] | None = None) -> dict:
+        """`contexto`: o lead como a empresa o vê. `perfis`: os da empresa (a pergunta geral só vê os leads deles)."""
+        corpo: dict = {"pergunta": pergunta, "cnpj": cnpj, "perfis": perfis}
         if contexto is not None:
             corpo["contexto"] = contexto
         return self._chamar("POST", "/v1/perguntar", timeout=self._agente_timeout, json=corpo)
+
+    # Produtos das empresas clientes: o módulo 3 repassa ao agente, que monta e classifica os perfis.
+    def produtos(self, dono: int) -> list[dict]:
+        return self._chamar("GET", "/v1/produtos", params={"dono": str(dono)})
+
+    def sugerir_produto(self, dono: int, descricao: str, perfil_id: str | None) -> dict:
+        return self._chamar("POST", "/v1/produtos/sugerir", timeout=self._agente_timeout,
+                            json={"dono": str(dono), "descricao": descricao, "perfil_id": perfil_id})
+
+    def salvar_produto(self, dono: int, descricao: str, perfil: dict, perfil_id: str | None) -> dict:
+        return self._chamar("POST", "/v1/produtos", timeout=self._agente_timeout,
+                            json={"dono": str(dono), "descricao": descricao, "perfil": perfil, "perfil_id": perfil_id})
+
+    def remover_produto(self, dono: int, perfil_id: str) -> dict:
+        return self._chamar("DELETE", f"/v1/produtos/{perfil_id}", params={"dono": str(dono)})
 
 
 def _detalhe(resp: httpx.Response) -> str | None:

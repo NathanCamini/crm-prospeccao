@@ -173,13 +173,16 @@ def relatorio(
     emp = ctx.empresa_id
     p = {"emp": emp, "ini": ini_utc, "fim": fim_utc, "d0": inicio.isoformat(), "d1": fim.isoformat(), "hoje": hoje(cfg.fuso).isoformat()}
 
+    # Perfil de cada lead pelo olhar da empresa: o melhor entre os perfis que ela vê (nunca o produto de outra).
+    perfil_visivel = (f"""(SELECT lp.perfil_id FROM lead_perfil lp WHERE lp.chave = {{t}}.chave
+                           AND {ctx.condicao_perfis("lp.perfil_id", p)} ORDER BY lp.e_alvo DESC, lp.score DESC LIMIT 1)""")
     ativ = conn.execute(
-        """SELECT a.chave, a.tipo, a.canal, a.assunto, a.criado_por, l.perfil_id FROM atividade a
-           LEFT JOIN lead l ON l.chave = a.chave
-           WHERE a.empresa_id = :emp AND a.criado_em >= :ini AND a.criado_em < :fim""", p).fetchall()
+        f"""SELECT a.chave, a.tipo, a.canal, a.assunto, a.criado_por, {perfil_visivel.format(t="a")} AS perfil_id
+            FROM atividade a WHERE a.empresa_id = :emp AND a.criado_em >= :ini AND a.criado_em < :fim""", p).fetchall()
     vendas = conn.execute(
-        """SELECT v.chave, v.valor_centavos, v.data, v.vendedor, l.perfil_id FROM venda v LEFT JOIN lead l ON l.chave = v.chave
-           WHERE v.empresa_id = :emp AND v.estornada_em IS NULL AND v.data BETWEEN :d0 AND :d1""", p).fetchall()
+        f"""SELECT v.chave, v.valor_centavos, v.data, v.vendedor, {perfil_visivel.format(t="v")} AS perfil_id
+            FROM venda v WHERE v.empresa_id = :emp AND v.estornada_em IS NULL AND v.data BETWEEN :d0 AND :d1""",
+        p).fetchall()
     tarefas_feitas = conn.execute(
         "SELECT responsavel, COUNT(*) AS n FROM tarefa WHERE empresa_id = :emp AND concluida_em >= :ini AND concluida_em < :fim GROUP BY responsavel",
         p).fetchall()

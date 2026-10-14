@@ -38,7 +38,8 @@ def listar(conn: sqlite3.Connection = Depends(db), _: Usuario = Depends(exige_su
                   (SELECT COUNT(*) FROM lead_estado l WHERE l.empresa_id = e.id AND l.estagio != 'novo') AS leads_trabalhados,
                   (SELECT COUNT(*) FROM lead_estado l WHERE l.empresa_id = e.id AND l.estagio = 'cliente') AS clientes,
                   (SELECT COUNT(*) FROM atividade a WHERE a.empresa_id = e.id AND a.tipo = 'contato' AND a.criado_em >= ?) AS contatos_7d,
-                  (SELECT MAX(criado_em) FROM atividade a WHERE a.empresa_id = e.id) AS ultima_atividade
+                  (SELECT MAX(criado_em) FROM atividade a WHERE a.empresa_id = e.id) AS ultima_atividade,
+                  (SELECT group_concat(p.nome, ' · ') FROM produto p WHERE p.empresa_id = e.id AND p.removido_em IS NULL) AS produtos
            FROM empresa e ORDER BY e.ativa DESC, e.nome""",
         (semana,),
     ).fetchall()
@@ -64,9 +65,20 @@ class NovaEmpresa(BaseModel):
     admin: PrimeiroAdmin
 
 
+def _sem_produto_alheio(conn: sqlite3.Connection, perfis: list[str], empresa_id: int | None) -> None:
+    """Produto que outra empresa descreveu não pode ser dado a esta (os leads dele são só dela)."""
+    if not perfis:
+        return
+    marcas = ", ".join("?" * len(perfis))
+    if conn.execute(f"SELECT 1 FROM produto WHERE perfil_id IN ({marcas}) AND empresa_id IS NOT ?",
+                    (*perfis, empresa_id)).fetchone():
+        raise HTTPException(422, "Um dos perfis é produto de outra empresa cliente.")
+
+
 @router.post("/empresas")
 def criar(dados: NovaEmpresa, request: Request, conn: sqlite3.Connection = Depends(db), u: Usuario = Depends(exige_super)) -> dict:
     nome_admin = dados.admin.usuario.strip().lower()
+    _sem_produto_alheio(conn, dados.perfis, None)
     if erro := validar_nome(nome_admin) or validar_senha(dados.admin.senha_inicial):
         raise HTTPException(422, erro)
     if conn.execute("SELECT 1 FROM empresa WHERE nome = ?", (dados.nome.strip(),)).fetchone():
@@ -110,6 +122,7 @@ def alterar(empresa_id: int, dados: Alteracao, request: Request, conn: sqlite3.C
     if dados.documento is not None:
         conn.execute("UPDATE empresa SET documento = ? WHERE id = ?", (dados.documento.strip() or None, empresa_id))
     if dados.perfis is not None:
+        _sem_produto_alheio(conn, dados.perfis, empresa_id)
         conn.execute("UPDATE empresa SET perfis = ? WHERE id = ?", (json.dumps(sorted(set(dados.perfis))), empresa_id))
     if dados.ativa is not None:
         conn.execute("UPDATE empresa SET ativa = ? WHERE id = ?", (int(dados.ativa), empresa_id))

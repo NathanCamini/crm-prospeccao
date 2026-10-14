@@ -59,15 +59,14 @@ class Contexto:
             return perfil_id in self.perfis
         return perfil_id not in self.perfis_ocultos
 
-    def filtro_perfis(self, coluna: str, params: dict) -> str:
-        """Trecho SQL (começa com AND) que limita `coluna` aos perfis que a empresa vê."""
+    def condicao_perfis(self, coluna: str, params: dict) -> str:
+        """Condição SQL que limita `coluna` (um perfil_id) aos perfis que a empresa vê."""
         lista, operador = (self.perfis, "IN") if self.perfis else (self.perfis_ocultos, "NOT IN")
         if not lista:
-            return ""
-        nomes = [f":perfil{i}" for i in range(len(lista))]
-        params |= {f"perfil{i}": v for i, v in enumerate(lista)}
-        nulo = "" if self.perfis else f" OR {coluna} IS NULL"
-        return f" AND ({coluna} {operador} ({', '.join(nomes)}){nulo})"
+            return "1"
+        nomes = [f":vperfil{i}" for i in range(len(lista))]
+        params |= {f"vperfil{i}": v for i, v in enumerate(lista)}
+        return f"{coluna} {operador} ({', '.join(nomes)})"
 
     @property
     def e_admin(self) -> bool:

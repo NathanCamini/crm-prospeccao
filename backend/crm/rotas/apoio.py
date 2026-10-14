@@ -60,11 +60,9 @@ def perguntar(
         linha = carregar_lead(conn, ctx, dados.chave, cfg, m3)
         exigir_acesso(conn, ctx, linha["chave"])
         chave = linha["chave"]
-        if linha["origem"] == "modulo3":
-            cnpj = chave
-        else:
-            contexto_lead = dados_do_lead(linha)
-    resposta = m3.perguntar(dados.pergunta.strip(), cnpj, contexto_lead)
+        cnpj = chave if linha["origem"] == "modulo3" else None
+        contexto_lead = dados_do_lead(linha)  # como a empresa vê: com a classificação do produto dela
+    resposta = m3.perguntar(dados.pergunta.strip(), cnpj, contexto_lead, ctx.perfis or None)
     if chave:
         atividade(conn, ctx, chave, "agente", resposta.get("resposta", "")[:8000], assunto=dados.pergunta.strip()[:300])
     anotar(request, "acesso", "agente.perguntar", entidade="lead" if chave else None, entidade_id=chave,
