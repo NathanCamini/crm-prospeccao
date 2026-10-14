@@ -102,11 +102,17 @@ class AgenteFalso:
                               request=httpx.Request(metodo, url))
 
 
-def test_perguntar_repassa_o_motivo_do_agente(monkeypatch):
+def test_perguntar_repassa_o_motivo_do_agente(monkeypatch, tmp_path: Path):
+    from modulo3.dados import Fonte
+
     monkeypatch.setenv("AGENTE_API", "http://agente:9000")
     monkeypatch.setattr("modulo3.main.httpx.request", AgenteFalso(503, {"detail": "GEMINI_API_KEY não configurada"}))
-    r = _cliente().post("/v1/perguntar", json={"pergunta": "oi"})
+    arquivo = tmp_path / "classificacao.csv"
+    arquivo.write_text("cnpj;razao_social;perfil_id;score\n12345678000195;HOTEL LTDA;p;80\n", encoding="utf-8")
+    r = TestClient(criar_app(fonte=Fonte(arquivo))).post("/v1/perguntar", json={"pergunta": "oi"})
     assert r.status_code == 503 and "GEMINI_API_KEY" in r.json()["detail"]
+    simulado = _cliente().post("/v1/perguntar", json={"pergunta": "oi"})  # demonstração: segue simulada
+    assert simulado.status_code == 200 and simulado.json()["fonte"] == "simulado"
 
 
 def test_perguntar_leva_os_perfis_da_empresa_e_aceita_agente_url_antigo(monkeypatch):

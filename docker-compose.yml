@@ -11,7 +11,7 @@
 #     agente-rotina:    classifica o mês novo em todos os perfis e grava o CSV do módulo 3
 #   O módulo 3 relê o CSV e busca os contatos; o CRM copia os leads a cada 30 min.
 #
-# Perfis opcionais: perguntas (agente responde no CRM), https (Caddy com certificado automático),
+# Perfis opcionais: https (Caddy com certificado automático),
 # etl (terminal do módulo 1: docker compose run --rm etl carga), testes.
 
 services:
@@ -23,8 +23,8 @@ services:
     image: prospeccao-modulo3:latest
     restart: unless-stopped
     environment:
-      MODULO2_CSV: ${MODULO2_CSV:-}               # ex.: /modulo2/classificacao.csv (vazio = dados simulados)
-      AGENTE_URL: ${AGENTE_URL:-}                 # http://agente-perguntas:9000/perguntar (vazio = resposta simulada)
+      MODULO2_CSV: ${MODULO2_CSV-/modulo2/classificacao.csv}   # CSV que o agente grava; vazio no .env = dados simulados
+      AGENTE_API: ${AGENTE_API:-http://agente-api:9000}         # perguntas e produtos das empresas clientes
       AGENTE_TIMEOUT_SEGUNDOS: ${AGENTE_TIMEOUT_SEGUNDOS:-120}
       # Busca de contatos das empresas-alvo (só com MODULO2_CSV)
       MODULO3_ENRIQUECER: ${MODULO3_ENRIQUECER:-true}
@@ -166,23 +166,20 @@ services:
       borda:
         ipv4_address: ${CRM_REDE_BORDA:-172.31.247}.2
 
-  # Perguntas do CRM ao agente (POST /perguntar). Ligue com:
-  #   docker compose --profile perguntas up -d    e, no .env, AGENTE_URL=http://agente-perguntas:9000/perguntar
-  agente-perguntas:
-    profiles: ["perguntas"]
+  # API do agente (módulo 2): monta o perfil de leads a partir do produto que cada empresa cliente descreve,
+  # classifica na hora e responde às perguntas do CRM. Só o módulo 3 fala com ela; a porta não é publicada.
+  # Precisa de GEMINI_API_KEY; sem a chave, sobe e explica o motivo em cada chamada.
+  agente-api:
     image: prospeccao-agente:latest
     build: ./agente
     restart: unless-stopped
     user: "${UID:-1000}:${GID:-1000}"
     command: ["servir", "--porta", "9000"]
     environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      <<: *agente_ambiente
       AGENTE_MODELO_PERGUNTAS: ${AGENTE_MODELO_PERGUNTAS:-gemini-2.5-flash}
-      AGENTE_DADOS_DIR: /dados
-      AGENTE_SAIDA_DIR: /saida
-    volumes:
-      - ./agente/dados:/dados                           # resumo das classificações (SQLite em WAL: precisa de escrita)
-      - ${MODULO2_PASTA:-./modulo2_saida}:/saida:ro      # principais alvos do último CSV
+      AGENTE_LIMITE_PERFIL_CLIENTE: ${AGENTE_LIMITE_PERFIL_CLIENTE:-1500}
+    volumes: *agente_volumes
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/saude', timeout=4)"]
       interval: 30s

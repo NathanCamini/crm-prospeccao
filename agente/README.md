@@ -1,8 +1,10 @@
 # Agente classificador (módulo 2)
 
-Classifica, a cada mês, as empresas novas da Receita para cada produto, em duas etapas: o SQL elimina o grosso no DuckDB e o LLM (Gemini) decide só o que o SQL não decide. O resultado fica no banco do agente e sai num CSV que o módulo 3 entrega ao CRM.
+Classifica, a cada mês, as empresas novas da Receita para cada produto que as empresas clientes descreveram no CRM, em duas etapas: o SQL elimina o grosso no DuckDB e o LLM (Gemini) decide só o que o SQL não decide. O resultado fica no banco do agente e sai num CSV que o módulo 3 entrega ao CRM.
 
-Medido em 2026-09: das 674.928 empresas novas, o filtro de atividade do perfil `amenities_hotel` (hospedagem, CNAE 5510/5590) deixa cerca de 1.400 para o LLM, em segundos. Porte e capital não cortam no SQL: o modelo pesa esses dados.
+O produto chega como texto ("vendo kits de amenities para hotéis e pousadas de SC"). O agente transforma o texto num **perfil**: atividades CNAE das empresas que compram, região e critérios. Mostra uma prévia com o último mês e, quando o cliente salva, classifica na hora (ver "Produtos das empresas clientes").
+
+Medido em 2026-09: das 674.928 empresas novas, o filtro de atividade de um perfil de hotelaria (CNAE 5510/5590) deixa cerca de 1.400 para o LLM, em segundos. Porte e capital não cortam no SQL: o modelo pesa esses dados.
 
 ```
 módulo 1 (etl/) ──► módulo 2 (este agente) ──► módulo 3 ──► CRM
@@ -10,7 +12,7 @@ exportacoes/novas/    agente/dados/agente.sqlite   lê modulo2_saida/classificac
 AAAA-MM/               └─ exportar-crm ──► modulo2_saida/classificacao.csv
 ```
 
-Também responde às perguntas da equipe no CRM (`agente servir`, ver "Perguntas do CRM").
+Também responde às perguntas da equipe no CRM. Os produtos e as perguntas ficam na API do agente (`agente servir`, serviço `agente-api`).
 
 O agente **não** baixa dados da Receita, não busca contatos e não envia mensagens: isso é dos módulos 1, 3 e 4.
 
@@ -21,10 +23,11 @@ Com Docker, da raiz do repositório:
 ```bash
 # no .env: GEMINI_API_KEY (e MODULO1_DADOS, se a base do módulo 1 não estiver em etl/data)
 docker compose build agente
+docker compose run --rm agente checar --lote          # chave, modelos e schema, com uma empresa fictícia
+docker compose up -d                                  # sobe a API do agente (agente-api) junto com o CRM
+docker compose --profile agendador up -d              # rotina do mês
+docker compose run --rm agente perfis                 # perfis em uso (os descritos pelas empresas clientes)
 docker compose run --rm agente validar --mes 2026-09
-docker compose run --rm agente classificar --mes 2026-09 --perfil amenities_hotel --modo online --amostra 10
-docker compose run --rm agente classificar --mes 2026-09 --perfil amenities_hotel
-docker compose run --rm agente exportar-crm      # o módulo 3 relê o CSV sozinho
 ```
 
 | Pasta | O que é | No contêiner |
@@ -48,7 +51,7 @@ Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exporta
 | Comando | O que faz |
 |---|---|
 | `agente perfis` | Lista e valida os perfis de `perfis/` |
-| `agente checar --perfil P [--lote]` | Testa chave, modelos e o schema do perfil com uma empresa fictícia, online e (com `--lote`) pela API de lote. Não grava nada; custa frações de centavo |
+| `agente checar [--perfil P] [--lote]` | Testa chave, modelos e o schema do perfil com uma empresa fictícia, online e (com `--lote`) pela API de lote. Não grava nada; custa frações de centavo |
 | `agente validar --mes AAAA-MM` | Confere o arquivo do mês contra o contrato e mostra quantas empresas passam no funil de cada perfil (sem LLM) |
 | `agente classificar --mes AAAA-MM --perfil P` | Classifica em lote (padrão). Rode de novo mais tarde para continuar |
 | `... classificar ... --aguardar` | Espera o lote terminar, até 26 h (para um agendador) |
@@ -62,7 +65,7 @@ Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exporta
 | `agente revisao-mensal --mes M --perfil P --saida revisao.csv` | 20 classificações aleatórias para conferir |
 | `agente custos [--mes M]` | Tokens e custo estimado por mês e perfil |
 | `agente rotina [--mes M] [--aguardar] [--repetir-horas N]` | Rotina do mês: classifica o mês mais novo do módulo 1 em todos os perfis e grava o CSV quando tudo termina |
-| `agente servir [--porta 9000]` | Responde às perguntas do CRM em `POST /perguntar` (o módulo 3 chama, via `AGENTE_URL`) |
+| `agente servir [--porta 9000]` | API para o módulo 3 (`AGENTE_API`): produtos das empresas clientes e perguntas do CRM |
 | `agente perguntar "texto" [--contexto lead.json]` | A mesma pergunta pelo terminal, para testar chave e modelo |
 
 Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicação no log.
@@ -71,7 +74,7 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 
 **Primeiro perfil:**
 
-0. `checar --perfil P --lote`: confere chave, modelos e o schema, inclusive no formato do lote, sem precisar do mês real.
+0. `checar --lote`: confere chave, modelos e o schema, inclusive no formato do lote, sem precisar do mês real.
 1. `classificar --modo online --amostra 10`: confere as respostas com empresas reais.
 2. `amostrar-rotulos --n 200`: uma pessoa preenche `e_alvo_humano` (sim/não) e, quando souber, `e_franquia_humano`.
 3. `classificar` do mês inteiro e `avaliar --rotulos`. Para confiar no perfil, a precisão precisa ser de pelo menos 85%, com 20 ou mais empresas previstas como alvo.
@@ -94,23 +97,50 @@ Continuam com a equipe:
 - `revisao-mensal`: 20 classificações conferidas por uma pessoa;
 - `custos`.
 
+## Produtos das empresas clientes
+
+O administrador de cada empresa cliente descreve no CRM (tela **Produtos**) o que vende e para quem. O CRM manda o texto ao módulo 3, que repassa à API do agente.
+
+| Rota | O que faz |
+|---|---|
+| `POST /perfis/sugerir` `{"dono", "descricao", "perfil_id"?}` | Monta o perfil e devolve a prévia. Nada é gravado |
+| `POST /perfis` `{"dono", "descricao", "perfil", "perfil_id"?}` | Grava (versão nova, se já existia) e classifica o último mês na hora, em segundo plano |
+| `GET /perfis?dono=X` | Produtos da empresa, com a situação da última classificação e o total de alvos |
+| `DELETE /perfis/{id}?dono=X` | Desativa: sai da rotina e do CSV; as classificações ficam no histórico |
+
+**Como o perfil é montado.** O modelo (`AGENTE_MODELO_PERGUNTAS`) recebe a descrição e a lista oficial de atividades (a tabela `cnae` da base do módulo 1). Devolve:
+
+- as atividades das empresas que **compram** o produto;
+- a UF e o município, se a descrição restringir a região;
+- de 2 a 5 critérios para avaliar cada empresa.
+
+O agente confere tudo antes de usar: só códigos que existem, só UFs válidas. Dono, id, versão e teto de custo são sempre definidos pelo agente, nunca pelo que veio da tela.
+
+**Prévia.** Mostra quantas empresas novas do último mês passam no filtro e alguns exemplos. O nome de MEI é do titular e não aparece.
+
+**Teto de custo.** `AGENTE_LIMITE_PERFIL_CLIENTE` (1.500) empresas por mês no filtro de um produto. Acima disso, a prévia pede uma descrição mais precisa e a gravação recusa.
+
+**Classificação na hora.** Uma por vez, em modo online, no último mês publicado. Termina regravando o `classificacao.csv` com os perfis ativos e a coluna `perfil_nome`. O módulo 3 relê e o CRM copia.
+
+**Onde fica.** Os perfis das empresas ficam na tabela `perfil_cliente` do banco do agente. Os arquivos em `perfis/*.yaml` continuam valendo para perfis da casa. `perfis/exemplos/amenities_hotel.yaml` é só referência e é o perfil usado por `agente checar`.
+
+**Dono.** É o identificador da empresa cliente no CRM. Um perfil só é lido, alterado e desativado pelo próprio dono.
+
 ## Perguntas do CRM
 
-`agente servir` sobe um servidor HTTP (porta 9000) no formato que o módulo 3 espera:
-
 ```
-POST /perguntar  {"pergunta": "texto", "contexto": { ...Lead do contrato v1... } | null}  →  {"resposta": "texto"}
+POST /perguntar  {"pergunta": "texto", "contexto": { ...Lead v1... } | null, "perfis": [ids] | null}  →  {"resposta": "texto"}
 GET  /saude
 ```
 
-- Com `contexto`, a pergunta é sobre a empresa: o modelo recebe os dados cadastrais, a classificação e quais tipos de contato existem.
-- Sem `contexto`, é geral: o modelo recebe os totais por mês e perfil e os 40 principais alvos do último `classificacao.csv`.
+- Com `contexto`, a pergunta é sobre a empresa: o modelo recebe os dados cadastrais, a classificação (a do produto de quem pergunta) e quais tipos de contato existem.
+- Sem `contexto`, é geral: o modelo recebe os totais e os 40 principais alvos do último `classificacao.csv`, só dos `perfis` da empresa que perguntou. Sem a lista, nunca entram perfis de empresas clientes.
 - O modelo nunca recebe CNPJ, telefone, e-mail, nem a razão social de MEI.
 - O modelo é o `AGENTE_MODELO_PERGUNTAS` (padrão `gemini-2.5-flash`). Cada pergunta registra tokens e custo estimado no log.
 - Sem `GEMINI_API_KEY` o servidor sobe mesmo assim e responde 503, com a explicação.
 - Erro do modelo vira 502, e o CRM mostra "o agente não respondeu".
 
-No Docker é o serviço `agente-perguntas` (`docker compose --profile perguntas up -d`), só na rede interna. Aponte o módulo 3 para ele com `AGENTE_URL=http://agente-perguntas:9000/perguntar`.
+No Docker é o serviço `agente-api`, sempre no ar, só na rede interna. O módulo 3 chega nele por `AGENTE_API=http://agente-api:9000`.
 
 ## Contrato de dados (entrada)
 
@@ -123,19 +153,20 @@ No Docker é o serviço `agente-perguntas` (`docker compose --profile perguntas 
 
 As três marcações da gold (`contato_compartilhado`, `filial_de_empresa_existente`, `pessoa_fisica_identificavel`) são opcionais na v1: entram como sinal quando o arquivo as tiver. Coluna nova, removida ou com outro significado exige a v2, com um novo arquivo em `schema/`.
 
-## Perfil (YAML)
+## Perfil
 
-Um arquivo por produto em `perfis/`; o nome do arquivo é o `id`.
+O mesmo formato vale para os perfis montados a partir das descrições (banco do agente) e para os arquivos em `perfis/*.yaml`, onde o nome do arquivo é o `id`. Arquivos em subpastas, como `perfis/exemplos/`, não entram na rotina.
 
 | Campo | Padrão | Para quê |
 |---|---|---|
 | `id`, `versao`, `produto` | — | identificação; **suba a `versao`** a cada mudança de critério |
+| `nome`, `dono` | — | nome que aparece no CRM; empresa cliente que descreveu o produto (perfis montados pelo agente) |
 | `filtro_sql.cnae_prefixos` / `cnaes` | — | atividade; pelo menos um dos dois é obrigatório |
 | `filtro_sql.incluir_cnaes_secundarios` | `false` | também quem tem a atividade só como secundária |
 | `filtro_sql.situacao` | `[ATIVA]` | situação cadastral |
 | `filtro_sql.capital_social_min` / `_max` | — | faixa de capital social. Use com cuidado: corta antes do modelo ver a empresa (unidade de rede costuma abrir com capital baixo); prefira um critério em `criterios_llm` |
 | `filtro_sql.excluir_mei` | `false` | exclui MEI |
-| `filtro_sql.portes`, `ufs`, `matriz_filial` | — | demais filtros |
+| `filtro_sql.portes`, `ufs`, `municipios`, `matriz_filial` | — | demais filtros (`municipios` compara sem acento) |
 | `criterios_llm` | — | perguntas que só o modelo responde |
 | `canal_preferido` | `[]` | informativo; o agente não usa |
 | `produtos_sugeriveis` | só `produto` | valores aceitos em `produto_sugerido` |
@@ -234,7 +265,7 @@ Nada é inferido sobre religião, saúde ou origem. O prompt trata os campos da 
 ## Testes
 
 ```bash
-cd agente && pytest                                       # 88 testes, com LLM falso (não gasta API)
+cd agente && pytest                                       # 98 testes, com LLM falso (não gasta API)
 docker compose --profile testes run --rm testes-agente   # o mesmo, no contêiner
 ```
 
@@ -258,3 +289,4 @@ Numeração contínua com o README da raiz.
 | D63 | O agente entrega ao módulo 3 um CSV (`exportar-crm`), gravado de uma vez, na pasta que o módulo 3 já lê. | É o formato que o módulo 3 simulado aceita (`MODULO2_CSV`); a cadeia segue elo a elo e o CRM não muda. O sinal por site saiu, porque o site vem do módulo 3, que roda depois do agente. |
 | D69 | `agente rotina`: classificação em lote de todos os perfis e exportação só quando nenhum lote está em andamento e há classificação nova (contagem e data da última gravada). | Roda a cada poucas horas sem gastar nada quando não há novidade, e o módulo 3 nunca recebe um CSV com metade dos perfis atualizados. |
 | D71 | O filtro SQL do perfil fica só com o que define o mercado do produto (atividade e situação); porte e capital viram critério do LLM. `amenities_hotel` v4 sem `capital_social_min` e `excluir_mei`. | Corte fixo de capital eliminava os hotéis de rede (capital de R$ 4.600 a R$ 50.000 em 2026-09). Com ~1.400 hospedagens por mês, o LLM em todas custa cerca de US$ 0,20. A atividade continua obrigatória (D57): sem ela, o mês inteiro iria ao LLM. |
+| D72 | Perfis montados pelo agente a partir da descrição do produto, guardados no banco do agente (`perfil_cliente`), com prévia, teto por produto e classificação online na hora; `perfis/*.yaml` vira opcional e o de hotelaria vira exemplo. | Pedido do usuário: o cliente explica o que vende. O agente valida o que o modelo propôs contra a tabela oficial de CNAEs, e o teto mantém o custo previsível. |

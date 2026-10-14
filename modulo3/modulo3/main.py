@@ -156,7 +156,12 @@ def criar_app(repo: Repositorio | None = None, fonte: Fonte | None = None, enriq
                 return Resposta(resposta=f"(Resposta simulada) {nome} foi cadastrada à mão e ainda não passou pelo agente. "
                                          "Conecte o agente do módulo 2 (AGENTE_API) para respostas reais.", fonte="simulado")
             return Resposta(resposta=_resposta_simulada(r, lead), fonte="simulado")
-        resp = chamar_agente("POST", "/perguntar", json={"pergunta": p.pergunta, "contexto": contexto, "perfis": p.perfis})
+        try:
+            resp = chamar_agente("POST", "/perguntar", json={"pergunta": p.pergunta, "contexto": contexto, "perfis": p.perfis})
+        except HTTPException as erro:
+            if erro.status_code == 503 and r.fonte == "simulado":  # demonstração sem chave do Gemini
+                return Resposta(resposta=_resposta_simulada(r, lead), fonte="simulado")
+            raise
         try:
             return Resposta(resposta=str(resp.json()["resposta"]), fonte="modulo2")
         except (KeyError, ValueError) as erro:
