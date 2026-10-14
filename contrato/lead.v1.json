@@ -1,0 +1,1245 @@
+{
+  "versao": "v1",
+  "descricao": "Contrato entre o módulo 3 (enriquecimento) e o módulo 4 (CRM). Gerado de modulo3/modelos.py.",
+  "endpoints": {
+    "GET /saude": null,
+    "GET /v1/perfis": "Perfil[]",
+    "POST /v1/leads/busca": "Filtro -> Pagina",
+    "GET /v1/leads/{cnpj}": "Lead",
+    "POST /v1/perguntar": "Pergunta -> Resposta"
+  },
+  "schemas": {
+    "Lead": {
+      "$defs": {
+        "Classificacao": {
+          "description": "Resultado do agente (módulo 2), repassado como veio.",
+          "properties": {
+            "perfil_id": {
+              "title": "Perfil Id",
+              "type": "string"
+            },
+            "perfil_versao": {
+              "default": 1,
+              "title": "Perfil Versao",
+              "type": "integer"
+            },
+            "score": {
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Score",
+              "type": "integer"
+            },
+            "e_alvo": {
+              "title": "E Alvo",
+              "type": "boolean"
+            },
+            "justificativa": {
+              "default": "",
+              "title": "Justificativa",
+              "type": "string"
+            },
+            "e_franquia": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "E Franquia"
+            },
+            "marca": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Marca"
+            },
+            "padrao": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Padrao"
+            },
+            "produto_sugerido": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Produto Sugerido"
+            },
+            "classificado_em": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Classificado Em"
+            }
+          },
+          "required": [
+            "perfil_id",
+            "score",
+            "e_alvo"
+          ],
+          "title": "Classificacao",
+          "type": "object"
+        },
+        "Contato": {
+          "description": "Contato complementar encontrado pelo módulo 3.",
+          "properties": {
+            "tipo": {
+              "enum": [
+                "email",
+                "telefone",
+                "whatsapp",
+                "site",
+                "formulario",
+                "rede_social"
+              ],
+              "title": "Tipo",
+              "type": "string"
+            },
+            "valor": {
+              "title": "Valor",
+              "type": "string"
+            },
+            "fonte": {
+              "title": "Fonte",
+              "type": "string"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Url"
+            },
+            "confianca": {
+              "enum": [
+                "alta",
+                "media",
+                "baixa"
+              ],
+              "title": "Confianca",
+              "type": "string"
+            },
+            "observacao": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Observacao"
+            }
+          },
+          "required": [
+            "tipo",
+            "valor",
+            "fonte",
+            "confianca"
+          ],
+          "title": "Contato",
+          "type": "object"
+        },
+        "ContatoReceita": {
+          "description": "Contato original da Receita, sem nenhuma transformação (decisão D8).",
+          "properties": {
+            "ddd_1": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ddd 1"
+            },
+            "telefone_1": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Telefone 1"
+            },
+            "ddd_2": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ddd 2"
+            },
+            "telefone_2": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Telefone 2"
+            },
+            "email": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Email"
+            }
+          },
+          "title": "ContatoReceita",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "cnpj": {
+          "pattern": "^[0-9A-Z]{12}[0-9]{2}$",
+          "title": "Cnpj",
+          "type": "string"
+        },
+        "razao_social": {
+          "title": "Razao Social",
+          "type": "string"
+        },
+        "nome_fantasia": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nome Fantasia"
+        },
+        "matriz_filial": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matriz Filial"
+        },
+        "situacao_cadastral": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Situacao Cadastral"
+        },
+        "data_inicio_atividade": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Inicio Atividade"
+        },
+        "cnae_principal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cnae Principal"
+        },
+        "cnae_descricao": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cnae Descricao"
+        },
+        "porte": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Porte"
+        },
+        "capital_social": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capital Social"
+        },
+        "logradouro": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logradouro"
+        },
+        "numero": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numero"
+        },
+        "bairro": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bairro"
+        },
+        "municipio": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Municipio"
+        },
+        "uf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uf"
+        },
+        "cep": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cep"
+        },
+        "contato_receita": {
+          "$ref": "#/$defs/ContatoReceita",
+          "default": {
+            "ddd_1": null,
+            "telefone_1": null,
+            "ddd_2": null,
+            "telefone_2": null,
+            "email": null
+          }
+        },
+        "contatos": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Contato"
+          },
+          "title": "Contatos",
+          "type": "array"
+        },
+        "classificacao": {
+          "$ref": "#/$defs/Classificacao"
+        },
+        "canal_sugerido": {
+          "anyOf": [
+            {
+              "enum": [
+                "email",
+                "whatsapp",
+                "formulario",
+                "telefone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Canal Sugerido"
+        },
+        "mes_referencia": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mes Referencia"
+        }
+      },
+      "required": [
+        "cnpj",
+        "razao_social",
+        "classificacao"
+      ],
+      "title": "Lead",
+      "type": "object"
+    },
+    "Filtro": {
+      "properties": {
+        "perfil_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perfil Id"
+        },
+        "perfis": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Perfis",
+          "type": "array"
+        },
+        "uf": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Uf",
+          "type": "array"
+        },
+        "municipio": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Municipio"
+        },
+        "score_min": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score Min",
+          "type": "integer"
+        },
+        "texto": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Texto"
+        },
+        "so_alvos": {
+          "default": true,
+          "title": "So Alvos",
+          "type": "boolean"
+        },
+        "cnpjs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cnpjs"
+        },
+        "excluir_cnpjs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluir Cnpjs",
+          "type": "array"
+        },
+        "ordenar": {
+          "default": "score",
+          "enum": [
+            "score",
+            "abertura",
+            "nome"
+          ],
+          "title": "Ordenar",
+          "type": "string"
+        },
+        "pagina": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Pagina",
+          "type": "integer"
+        },
+        "por_pagina": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Por Pagina",
+          "type": "integer"
+        },
+        "apenas_cnpjs": {
+          "default": false,
+          "title": "Apenas Cnpjs",
+          "type": "boolean"
+        }
+      },
+      "title": "Filtro",
+      "type": "object"
+    },
+    "Pagina": {
+      "$defs": {
+        "Classificacao": {
+          "description": "Resultado do agente (módulo 2), repassado como veio.",
+          "properties": {
+            "perfil_id": {
+              "title": "Perfil Id",
+              "type": "string"
+            },
+            "perfil_versao": {
+              "default": 1,
+              "title": "Perfil Versao",
+              "type": "integer"
+            },
+            "score": {
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Score",
+              "type": "integer"
+            },
+            "e_alvo": {
+              "title": "E Alvo",
+              "type": "boolean"
+            },
+            "justificativa": {
+              "default": "",
+              "title": "Justificativa",
+              "type": "string"
+            },
+            "e_franquia": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "E Franquia"
+            },
+            "marca": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Marca"
+            },
+            "padrao": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Padrao"
+            },
+            "produto_sugerido": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Produto Sugerido"
+            },
+            "classificado_em": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Classificado Em"
+            }
+          },
+          "required": [
+            "perfil_id",
+            "score",
+            "e_alvo"
+          ],
+          "title": "Classificacao",
+          "type": "object"
+        },
+        "Contato": {
+          "description": "Contato complementar encontrado pelo módulo 3.",
+          "properties": {
+            "tipo": {
+              "enum": [
+                "email",
+                "telefone",
+                "whatsapp",
+                "site",
+                "formulario",
+                "rede_social"
+              ],
+              "title": "Tipo",
+              "type": "string"
+            },
+            "valor": {
+              "title": "Valor",
+              "type": "string"
+            },
+            "fonte": {
+              "title": "Fonte",
+              "type": "string"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Url"
+            },
+            "confianca": {
+              "enum": [
+                "alta",
+                "media",
+                "baixa"
+              ],
+              "title": "Confianca",
+              "type": "string"
+            },
+            "observacao": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Observacao"
+            }
+          },
+          "required": [
+            "tipo",
+            "valor",
+            "fonte",
+            "confianca"
+          ],
+          "title": "Contato",
+          "type": "object"
+        },
+        "ContatoReceita": {
+          "description": "Contato original da Receita, sem nenhuma transformação (decisão D8).",
+          "properties": {
+            "ddd_1": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ddd 1"
+            },
+            "telefone_1": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Telefone 1"
+            },
+            "ddd_2": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ddd 2"
+            },
+            "telefone_2": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Telefone 2"
+            },
+            "email": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Email"
+            }
+          },
+          "title": "ContatoReceita",
+          "type": "object"
+        },
+        "Lead": {
+          "properties": {
+            "cnpj": {
+              "pattern": "^[0-9A-Z]{12}[0-9]{2}$",
+              "title": "Cnpj",
+              "type": "string"
+            },
+            "razao_social": {
+              "title": "Razao Social",
+              "type": "string"
+            },
+            "nome_fantasia": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Nome Fantasia"
+            },
+            "matriz_filial": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matriz Filial"
+            },
+            "situacao_cadastral": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Situacao Cadastral"
+            },
+            "data_inicio_atividade": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Data Inicio Atividade"
+            },
+            "cnae_principal": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cnae Principal"
+            },
+            "cnae_descricao": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cnae Descricao"
+            },
+            "porte": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Porte"
+            },
+            "capital_social": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Capital Social"
+            },
+            "logradouro": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Logradouro"
+            },
+            "numero": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Numero"
+            },
+            "bairro": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bairro"
+            },
+            "municipio": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Municipio"
+            },
+            "uf": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Uf"
+            },
+            "cep": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cep"
+            },
+            "contato_receita": {
+              "$ref": "#/$defs/ContatoReceita",
+              "default": {
+                "ddd_1": null,
+                "telefone_1": null,
+                "ddd_2": null,
+                "telefone_2": null,
+                "email": null
+              }
+            },
+            "contatos": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Contato"
+              },
+              "title": "Contatos",
+              "type": "array"
+            },
+            "classificacao": {
+              "$ref": "#/$defs/Classificacao"
+            },
+            "canal_sugerido": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "email",
+                    "whatsapp",
+                    "formulario",
+                    "telefone"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Canal Sugerido"
+            },
+            "mes_referencia": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Mes Referencia"
+            }
+          },
+          "required": [
+            "cnpj",
+            "razao_social",
+            "classificacao"
+          ],
+          "title": "Lead",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "contrato": {
+          "default": "v1",
+          "title": "Contrato",
+          "type": "string"
+        },
+        "fonte": {
+          "enum": [
+            "simulado",
+            "modulo2"
+          ],
+          "title": "Fonte",
+          "type": "string"
+        },
+        "mes_referencia": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mes Referencia"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "pagina": {
+          "title": "Pagina",
+          "type": "integer"
+        },
+        "por_pagina": {
+          "title": "Por Pagina",
+          "type": "integer"
+        },
+        "itens": {
+          "items": {
+            "$ref": "#/$defs/Lead"
+          },
+          "title": "Itens",
+          "type": "array"
+        },
+        "cnpjs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cnpjs"
+        }
+      },
+      "required": [
+        "fonte",
+        "mes_referencia",
+        "total",
+        "pagina",
+        "por_pagina",
+        "itens"
+      ],
+      "title": "Pagina",
+      "type": "object"
+    },
+    "Perfil": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "nome": {
+          "title": "Nome",
+          "type": "string"
+        },
+        "produto": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Produto"
+        },
+        "total_alvos": {
+          "title": "Total Alvos",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "nome",
+        "total_alvos"
+      ],
+      "title": "Perfil",
+      "type": "object"
+    },
+    "Pergunta": {
+      "properties": {
+        "pergunta": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Pergunta",
+          "type": "string"
+        },
+        "cnpj": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cnpj"
+        },
+        "contexto": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contexto"
+        }
+      },
+      "required": [
+        "pergunta"
+      ],
+      "title": "Pergunta",
+      "type": "object"
+    },
+    "Resposta": {
+      "properties": {
+        "resposta": {
+          "title": "Resposta",
+          "type": "string"
+        },
+        "fonte": {
+          "enum": [
+            "simulado",
+            "modulo2"
+          ],
+          "title": "Fonte",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resposta",
+        "fonte"
+      ],
+      "title": "Resposta",
+      "type": "object"
+    }
+  }
+}

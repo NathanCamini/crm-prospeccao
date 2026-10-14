@@ -1,0 +1,57 @@
+# CRM de prospecção (módulo 4) + módulo 3 simulado.
+#
+#   docker compose up -d --build
+#   docker compose run --rm crm-api python -m crm superadmin criar seu-nome
+#   abra http://localhost:8080
+#
+# Cadeia: web (4) -> crm-api (4) -> modulo3 (3) -> agente (2). Nenhum serviço pula um elo.
+
+services:
+  modulo3:
+    build: ./modulo3_stub
+    image: prospeccao-modulo3:latest
+    restart: unless-stopped
+    environment:
+      MODULO2_CSV: ${MODULO2_CSV:-}               # ex.: /modulo2/classificacao.csv (vazio = dados simulados)
+      AGENTE_URL: ${AGENTE_URL:-}                 # ex.: http://host.docker.internal:9000/perguntar
+      AGENTE_TIMEOUT_SEGUNDOS: ${AGENTE_TIMEOUT_SEGUNDOS:-120}
+    volumes:
+      - ${MODULO2_PASTA:-./modulo2_saida}:/modulo2:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"     # permite chegar ao agente rodando no seu computador
+
+  crm-api:
+    build: ./backend
+    image: prospeccao-crm-api:latest
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      modulo3:
+        condition: service_healthy
+    environment:
+      MODULO3_URL: http://modulo3:8100
+      CRM_DADOS_DIR: /dados
+      CRM_SESSAO_DIAS: ${CRM_SESSAO_DIAS:-30}
+      CRM_COOKIE_SECURE: ${CRM_COOKIE_SECURE:-false}
+      CRM_SINCRONIZAR_MINUTOS: ${CRM_SINCRONIZAR_MINUTOS:-30}   # cópia local dos leads do módulo 3; 0 = só manual
+      CRM_FUSO: ${CRM_FUSO:-America/Sao_Paulo}                  # "hoje", agenda e relatórios
+      CRM_CONFIAR_PROXY: "true"                                 # IP real na auditoria vem do nginx (web)
+      AGENTE_TIMEOUT_SEGUNDOS: ${AGENTE_TIMEOUT_SEGUNDOS:-120}
+    volumes:
+      - ./dados:/dados
+
+  web:
+    build: ./frontend
+    image: prospeccao-crm-web:latest
+    restart: unless-stopped
+    depends_on:
+      crm-api:
+        condition: service_healthy
+    ports:
+      - "${CRM_ENDERECO:-127.0.0.1}:${CRM_PORTA:-8080}:8080"
+
+  testes:
+    profiles: ["testes"]
+    image: prospeccao-crm-api:latest
+    build: ./backend
+    command: ["python", "-m", "pytest", "-q"]

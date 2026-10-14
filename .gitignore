@@ -1,0 +1,10 @@
+.env
+dados/*
+!dados/.gitkeep
+modulo2_saida/*
+!modulo2_saida/.gitkeep
+**/__pycache__/
+**/.pytest_cache/
+**/*.egg-info/
+frontend/node_modules/
+frontend/dist/
