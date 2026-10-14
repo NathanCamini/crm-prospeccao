@@ -10,6 +10,8 @@ exportacoes/novas/    agente/dados/agente.sqlite   lê modulo2_saida/classificac
 AAAA-MM/               └─ exportar-crm ──► modulo2_saida/classificacao.csv
 ```
 
+Também responde às perguntas da equipe no CRM (`agente servir`, ver "Perguntas do CRM").
+
 O agente **não** baixa dados da Receita, não busca contatos e não envia mensagens: isso é dos módulos 1, 3 e 4.
 
 ## Rodar
@@ -39,7 +41,7 @@ pip install -e ".[dev]"
 agente validar --mes 2026-09      # lê ../etl/data por padrão
 ```
 
-Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exportacoes/novas`), `AGENTE_GOLD_DB` (`../etl/data/gold/empresas.duckdb`; sem o arquivo, segue sem o sinal de sócio), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`.
+Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exportacoes/novas`), `AGENTE_GOLD_DB` (`../etl/data/gold/empresas.duckdb`; sem o arquivo, segue sem o sinal de sócio), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`, `AGENTE_MODELO_PERGUNTAS`.
 
 ## Comandos
 
@@ -58,6 +60,8 @@ Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exporta
 | `agente avaliar --perfil P --rotulos rotulos.csv` | Precisão e cobertura; sai com código 1 abaixo da meta |
 | `agente revisao-mensal --mes M --perfil P --saida revisao.csv` | 20 classificações aleatórias para conferir |
 | `agente custos [--mes M]` | Tokens e custo estimado por mês e perfil |
+| `agente servir [--porta 9000]` | Responde às perguntas do CRM em `POST /perguntar` (o módulo 3 chama, via `AGENTE_URL`) |
+| `agente perguntar "texto" [--contexto lead.json]` | A mesma pergunta pelo terminal, para testar chave e modelo |
 
 Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicação no log.
 
@@ -77,6 +81,24 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 4. `exportar-crm`. O módulo 3 relê o CSV, busca os contatos das empresas-alvo e o CRM copia os leads na sincronização seguinte (ou na hora, em **Clientes**).
 5. `revisao-mensal`: 20 classificações conferidas por uma pessoa.
 6. `custos`.
+
+## Perguntas do CRM
+
+`agente servir` sobe um servidor HTTP (porta 9000) no formato que o módulo 3 espera:
+
+```
+POST /perguntar  {"pergunta": "texto", "contexto": { ...Lead do contrato v1... } | null}  →  {"resposta": "texto"}
+GET  /saude
+```
+
+- Com `contexto`, a pergunta é sobre a empresa: o modelo recebe os dados cadastrais, a classificação e quais tipos de contato existem.
+- Sem `contexto`, é geral: o modelo recebe os totais por mês e perfil e os 40 principais alvos do último `classificacao.csv`.
+- O modelo nunca recebe CNPJ, telefone, e-mail, nem a razão social de MEI.
+- O modelo é o `AGENTE_MODELO_PERGUNTAS` (padrão `gemini-2.5-flash`). Cada pergunta registra tokens e custo estimado no log.
+- Sem `GEMINI_API_KEY` o servidor sobe mesmo assim e responde 503, com a explicação.
+- Erro do modelo vira 502, e o CRM mostra "o agente não respondeu".
+
+No Docker é o serviço `agente-perguntas` (`docker compose --profile perguntas up -d`), só na rede interna. Aponte o módulo 3 para ele com `AGENTE_URL=http://agente-perguntas:9000/perguntar`.
 
 ## Contrato de dados (entrada)
 
@@ -200,7 +222,7 @@ Nada é inferido sobre religião, saúde ou origem. O prompt trata os campos da 
 ## Testes
 
 ```bash
-cd agente && pytest                                       # 64 testes, com LLM falso (não gasta API)
+cd agente && pytest                                       # 78 testes, com LLM falso (não gasta API)
 docker compose --profile testes run --rm testes-agente   # o mesmo, no contêiner
 ```
 
@@ -209,7 +231,6 @@ docker compose --profile testes run --rm testes-agente   # o mesmo, no contêine
 - **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. Faça o teste online com `--amostra` e um lote pequeno antes do mês inteiro.
 - **Capital mínimo no perfil de exemplo:** na base real de 2026-09, todas as 27 empresas com sinal de rede (Atlantica, Accor) têm capital de R$ 4.600 a R$ 50.000. Com `capital_social_min: 100000`, hotéis de bandeira ficam fora do funil. Revise se eles interessam.
 - **Franquia ou unidade própria:** sócio holding e e-mail da rede mostram que a unidade é da rede, mas não distinguem franquia de unidade própria. O modelo decide com os dados, e a rotulagem mede o acerto.
-- **Perguntas do CRM:** o endpoint `POST /perguntar` que o módulo 3 chama (`AGENTE_URL`) não faz parte deste agente; sem ele o CRM responde em modo simulado.
 
 ## Decisões
 

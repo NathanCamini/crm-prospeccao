@@ -10,6 +10,8 @@
     agente revisao-mensal --mes 2026-10 --perfil amenities_hotel --saida revisao.csv
     agente custos [--mes 2026-10]
     agente exportar-crm [--perfil amenities_hotel] [--mes 2026-10]
+    agente servir [--porta 9000]                 perguntas do CRM (POST /perguntar), via módulo 3
+    agente perguntar "texto" [--contexto lead.json]
 """
 
 from __future__ import annotations
@@ -92,6 +94,14 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     ex.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos os classificados")
     ex.add_argument("--mes", help="Só este mês. Padrão: todos os meses classificados")
     ex.add_argument("--saida", type=Path, help=f"Padrão: AGENTE_SAIDA_DIR/{ARQUIVO_CRM}")
+
+    sv = sub.add_parser("servir", help="Responde às perguntas do CRM em POST /perguntar (o módulo 3 chama, AGENTE_URL)")
+    sv.add_argument("--endereco", default="0.0.0.0")
+    sv.add_argument("--porta", type=int, default=9000)
+
+    pg = sub.add_parser("perguntar", help="Faz uma pergunta ao agente pelo terminal (para testar)")
+    pg.add_argument("pergunta")
+    pg.add_argument("--contexto", type=Path, help="JSON de um lead (contrato v1) para perguntar sobre ele")
     return p.parse_args(argv)
 
 
@@ -182,6 +192,17 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
             return 0
         if args.comando == "custos":
             _tabela(banco().custos(args.mes))
+            return 0
+        if args.comando == "servir":
+            from agente.perguntas import servir
+
+            servir(cfg, fabrica_cliente, args.endereco, args.porta)
+            return 0
+        if args.comando == "perguntar":
+            from agente.perguntas import Assistente
+
+            contexto = json.loads(args.contexto.read_text(encoding="utf-8")) if args.contexto else None
+            print(Assistente(cfg, fabrica_cliente(cfg)).responder(args.pergunta, contexto))
             return 0
         if args.comando == "exportar-crm":
             saida = args.saida or cfg.saida_dir / ARQUIVO_CRM

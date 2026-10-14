@@ -139,19 +139,23 @@ O agente grava uma linha por CNPJ × perfil, da versão vigente de cada perfil, 
 
 Com o CSV real os links passam a abrir de verdade (a fonte deixa de ser "simulado").
 
-**Perguntas ao agente.** Ainda não existe: o agente de `agente/` só classifica, então o CRM segue com a resposta simulada. Para ligar, o agente precisa expor um endpoint HTTP:
-
-```
-POST {AGENTE_URL}
-{"pergunta": "texto", "contexto": { ...Lead do contrato v1... } | null}
-→ 200 {"resposta": "texto"}
-```
+**Perguntas ao agente.** O agente responde em `POST /perguntar` com o comando `agente servir`. No Docker:
 
 ```env
-AGENTE_URL=http://host.docker.internal:9000/perguntar
+GEMINI_API_KEY=...
+AGENTE_URL=http://agente-perguntas:9000/perguntar
 ```
 
-`contexto` vem preenchido quando a pergunta é feita na ficha de uma empresa. A resposta fica no histórico dela.
+```bash
+docker compose --profile perguntas up -d
+```
+
+O caminho segue elo a elo: CRM → módulo 3 → agente.
+
+- Pergunta feita na ficha de uma empresa: o agente recebe os dados dela e a classificação. A resposta fica no histórico da empresa.
+- Pergunta geral: o agente recebe o resumo das classificações e os principais alvos do último CSV.
+- O agente nunca recebe CNPJ, telefone nem e-mail. Dos contatos encontrados, vai só o tipo e a confiança.
+- Sem `AGENTE_URL`, o CRM segue com a resposta simulada.
 
 ## Módulo 3: contatos complementares
 
@@ -211,7 +215,7 @@ cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento ent
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
 cd modulo3 && pytest        # 14 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos
 cd etl && pytest            # 192 testes do módulo 1: carga, arquivo do mês para o agente, consultas, contatos, exportação, interface
-cd agente && pytest         # 64 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM
+cd agente && pytest         # 78 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas
 cd frontend && npm run build  # checagem de tipos + build
 ```
 
@@ -256,3 +260,4 @@ modulo2_saida/  CSV que o agente grava e o módulo 3 lê
 | D56 | Datas de agenda e relatórios no fuso `America/Sao_Paulo` (`CRM_FUSO`); horários gravados em UTC. | "Hoje" e "semana" precisam bater com o relógio da equipe; UTC no banco evita ambiguidade. |
 | D66 | O módulo 3 real nasce do simulado e usa o serviço de contatos do módulo 1 (`prospeccao.enrich`), com banco próprio. | A busca de contatos já existia, testada, no módulo 1; o módulo 3 só a aplica às empresas-alvo do agente. O contrato v1 e o CRM não mudam. O pacote do módulo 1 entra sem as dependências pesadas (Streamlit, pandas), que o enriquecimento não usa. |
 | D67 | O módulo 3 relê o CSV do agente quando o arquivo muda, em vez de ler só ao subir. | A rotina do mês deixa de depender de reiniciar o contêiner; o agente já grava o CSV de uma vez (D63), então nunca se lê um arquivo pela metade. |
+| D68 | Perguntas respondidas pelo próprio agente (`agente servir`), com servidor HTTP da biblioteca padrão e o mesmo cliente Gemini da classificação. | Sem dependência nova no agente e sem outro serviço de LLM. A minimização de dados da D61 vale também para as perguntas. O serviço fica num perfil do compose: sem chave do Gemini, o CRM continua no modo simulado em vez de dar erro. |
