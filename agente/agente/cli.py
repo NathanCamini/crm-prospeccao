@@ -1,6 +1,7 @@
 """Linha de comando do agente classificador (módulo 2).
 
     agente perfis
+    agente checar --perfil amenities_hotel [--lote]   chave, modelos e schema com uma empresa fictícia
     agente validar --mes 2026-10
     agente classificar --mes 2026-10 --perfil amenities_hotel [--modo lote|online] [--aguardar]
     agente lotes
@@ -47,6 +48,10 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     sub = p.add_subparsers(dest="comando", required=True)
 
     sub.add_parser("perfis", help="Lista e valida os perfis em perfis/")
+
+    ck = sub.add_parser("checar", help="Testa chave, modelos e schema do perfil com uma empresa fictícia (centavos)")
+    ck.add_argument("--perfil", required=True)
+    ck.add_argument("--lote", action="store_true", help="Testa também a API de lote (espera até 1 h)")
 
     v = sub.add_parser("validar", help="Confere o arquivo do mês contra o contrato e mostra o funil de cada perfil")
     v.add_argument("--mes", required=True)
@@ -149,6 +154,12 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
                 except PerfilInvalidoError as exc:
                     print(f"{perfil_id}: INVÁLIDO — {exc}")
             return 0
+        if args.comando == "checar":
+            from agente.checagem import checar
+
+            ok, linhas = checar(cfg, fabrica_cliente(cfg), args.perfil, lote=args.lote)
+            print("\n".join(linhas))
+            return 0 if ok else 1
         if args.comando == "validar":
             arquivo = validar_mes(cfg.novas_dir, args.mes, cfg.schema_dir)
             print(f"{arquivo.parquet}: {arquivo.total_linhas} empresas, contrato v{arquivo.contrato.versao} ok")

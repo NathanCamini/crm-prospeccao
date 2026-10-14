@@ -256,7 +256,7 @@ cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento ent
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
 cd modulo3 && pytest        # 15 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos
 cd etl && pytest            # 192 testes do módulo 1: carga, arquivo do mês para o agente, consultas, contatos, exportação, interface
-cd agente && pytest         # 85 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas, rotina
+cd agente && pytest         # 88 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas, rotina
 cd frontend && npm run build  # checagem de tipos + build
 ```
 

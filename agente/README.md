@@ -48,6 +48,7 @@ Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exporta
 | Comando | O que faz |
 |---|---|
 | `agente perfis` | Lista e valida os perfis de `perfis/` |
+| `agente checar --perfil P [--lote]` | Testa chave, modelos e o schema do perfil com uma empresa fictícia, online e (com `--lote`) pela API de lote. Não grava nada; custa frações de centavo |
 | `agente validar --mes AAAA-MM` | Confere o arquivo do mês contra o contrato e mostra quantas empresas passam no funil de cada perfil (sem LLM) |
 | `agente classificar --mes AAAA-MM --perfil P` | Classifica em lote (padrão). Rode de novo mais tarde para continuar |
 | `... classificar ... --aguardar` | Espera o lote terminar, até 26 h (para um agendador) |
@@ -70,7 +71,8 @@ Erro de contrato, de perfil ou de funil grande sai com código 2 e a explicaçã
 
 **Primeiro perfil:**
 
-1. `classificar --modo online --amostra 10`: confere chave, modelos e respostas.
+0. `checar --perfil P --lote`: confere chave, modelos e o schema, inclusive no formato do lote, sem precisar do mês real.
+1. `classificar --modo online --amostra 10`: confere as respostas com empresas reais.
 2. `amostrar-rotulos --n 200`: uma pessoa preenche `e_alvo_humano` (sim/não) e, quando souber, `e_franquia_humano`.
 3. `classificar` do mês inteiro e `avaliar --rotulos`. Para confiar no perfil, a precisão precisa ser de pelo menos 85%, com 20 ou mais empresas previstas como alvo.
 
@@ -232,13 +234,13 @@ Nada é inferido sobre religião, saúde ou origem. O prompt trata os campos da 
 ## Testes
 
 ```bash
-cd agente && pytest                                       # 85 testes, com LLM falso (não gasta API)
+cd agente && pytest                                       # 88 testes, com LLM falso (não gasta API)
 docker compose --profile testes run --rm testes-agente   # o mesmo, no contêiner
 ```
 
 ## Pontos em aberto
 
-- **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. Faça o teste online com `--amostra` e um lote pequeno antes do mês inteiro.
+- **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. `agente checar --perfil P --lote` testa isso com uma empresa fictícia antes do mês inteiro.
 - **Capital mínimo no perfil de exemplo:** na base real de 2026-09, todas as 27 empresas com sinal de rede (Atlantica, Accor) têm capital de R$ 4.600 a R$ 50.000. Com `capital_social_min: 100000`, hotéis de bandeira ficam fora do funil. Revise se eles interessam.
 - **Franquia ou unidade própria:** sócio holding e e-mail da rede mostram que a unidade é da rede, mas não distinguem franquia de unidade própria. O modelo decide com os dados, e a rotulagem mede o acerto.
 
