@@ -5,8 +5,8 @@ Classifica, a cada mês, as empresas novas da Receita para cada produto, em duas
 Medido em 2026-09: 674.928 empresas novas → **190** passaram no funil do perfil `amenities_hotel` em 1,6 s, antes de qualquer chamada ao LLM.
 
 ```
-módulo 1 (ETL) ──► módulo 2 (este agente) ──► módulo 3 ──► CRM
-exportacoes/novas/     agente/dados/agente.sqlite   lê modulo2_saida/classificacao.csv
+módulo 1 (etl/) ──► módulo 2 (este agente) ──► módulo 3 ──► CRM
+exportacoes/novas/    agente/dados/agente.sqlite   lê modulo2_saida/classificacao.csv
 AAAA-MM/               └─ exportar-crm ──► modulo2_saida/classificacao.csv
 ```
 
@@ -17,7 +17,7 @@ O agente **não** baixa dados da Receita, não busca contatos e não envia mensa
 Com Docker, da raiz do repositório:
 
 ```bash
-# no .env: GEMINI_API_KEY e MODULO1_DADOS (a pasta data/ do módulo 1)
+# no .env: GEMINI_API_KEY (e MODULO1_DADOS, se a base do módulo 1 não estiver em etl/data)
 docker compose build agente
 docker compose run --rm agente validar --mes 2026-09
 docker compose run --rm agente classificar --mes 2026-09 --perfil amenities_hotel --modo online --amostra 10
@@ -28,7 +28,7 @@ docker compose restart modulo3
 
 | Pasta | O que é | No contêiner |
 |---|---|---|
-| `MODULO1_DADOS` (padrão `agente/modulo1/`) | saída do módulo 1: `exportacoes/novas/AAAA-MM/` e, se existir, `gold/empresas.duckdb` | `/modulo1`, só leitura |
+| `MODULO1_DADOS` (padrão `etl/data/`) | saída do módulo 1: `exportacoes/novas/AAAA-MM/` e, se existir, `gold/empresas.duckdb` | `/modulo1`, só leitura |
 | `agente/perfis/` | perfis (YAML) e lista de redes | `/app/perfis`, só leitura |
 | `agente/dados/` | banco do agente (`agente.sqlite`) e arquivos de lote | `/dados` |
 | `MODULO2_PASTA` (padrão `modulo2_saida/`) | `classificacao.csv` para o módulo 3 | `/saida` |
@@ -37,10 +37,10 @@ Sem Docker (Python 3.11+), de dentro de `agente/`:
 
 ```bash
 pip install -e ".[dev]"
-AGENTE_ENTRADA_DIR=../../prospeccao-empresas/data/exportacoes/novas agente validar --mes 2026-09
+agente validar --mes 2026-09      # lê ../etl/data por padrão
 ```
 
-Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `modulo1/exportacoes/novas`), `AGENTE_GOLD_DB` (opcional), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`.
+Variáveis: `GEMINI_API_KEY`, `AGENTE_ENTRADA_DIR` (padrão `../etl/data/exportacoes/novas`), `AGENTE_GOLD_DB` (`../etl/data/gold/empresas.duckdb`; sem o arquivo, segue sem o sinal de sócio), `AGENTE_DADOS_DIR` (`dados`), `AGENTE_SAIDA_DIR` (`../modulo2_saida`), `AGENTE_PERFIS_DIR` (`perfis`), `AGENTE_SCHEMA_DIR` (`schema`), `AGENTE_MODELO_TRIAGEM`, `AGENTE_MODELO_REVISAO`.
 
 ## Comandos
 
@@ -121,7 +121,7 @@ O cadastro da Receita não diz se a empresa é franquia. O agente calcula sinais
 | nome fantasia ou razão social com o termo da marca (palavra inteira, sem acento) | marca | `perfis/marcas_rede.csv` |
 | o mesmo, aproximado (erro de digitação, 85% de semelhança) | marca, evidência fraca | idem |
 | e-mail da Receita no domínio da rede | rede | idem + arquivo do mês |
-| sócio pessoa jurídica com nome de holding da rede | rede | tabela `socio` da gold do módulo 1 (se `AGENTE_GOLD_DB` existir) |
+| sócio pessoa jurídica com nome de holding da rede | rede | tabela `socio` da gold do módulo 1, se existir |
 | filial de empresa existente | nova unidade de rede | marcação do módulo 1 |
 
 Na base real de 2026-09, entre as 1.412 hospedagens novas (CNAE 5510/5590), os sinais acharam 14 SPEs com sócio Atlantica Hotels, 10 empresas com e-mail `@accor.com` e sócio Hotelaria Accor, e 3 filiais com "Comfort Hotel" na razão social. A lista de `marcas_rede.csv` é **inicial**, de hotelaria: complete com o catálogo da ABF e só inclua domínios confirmados.
@@ -207,7 +207,7 @@ docker compose --profile testes run --rm testes-agente   # o mesmo, no contêine
 
 ## Pontos em aberto
 
-- **Contrato v1 a confirmar com o módulo 1:** o `schema/empresas_novas.v1.json` segue o documento de arquitetura; o ETL precisa produzir exatamente esse arquivo em `exportacoes/novas/AAAA-MM/`.
+- **O módulo 1 ainda não gera a entrada do agente:** o `etl/` tem o `exportar-parquet` (todos os ativos, para o Colab), mas não o arquivo mensal `exportacoes/novas/AAAA-MM/` no formato de `schema/empresas_novas.v1.json`. Até existir, o agente não tem o que classificar.
 - **Primeira execução real:** o JSON Schema no formato do lote (`responseJsonSchema`) ainda não foi testado contra a API real. Faça o teste online com `--amostra` e um lote pequeno antes do mês inteiro.
 - **Capital mínimo no perfil de exemplo:** na base real de 2026-09, todas as 27 empresas com sinal de rede (Atlantica, Accor) têm capital de R$ 4.600 a R$ 50.000. Com `capital_social_min: 100000`, hotéis de bandeira ficam fora do funil. Revise se eles interessam.
 - **Franquia ou unidade própria:** sócio holding e e-mail da rede mostram que a unidade é da rede, mas não distinguem franquia de unidade própria. O modelo decide com os dados, e a rotulagem mede o acerto.
