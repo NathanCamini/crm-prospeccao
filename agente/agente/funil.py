@@ -12,6 +12,7 @@ import duckdb
 
 from agente.contrato import ArquivoDoMes
 from agente.perfil import FiltroSQL, Perfil
+from agente.texto import normalizar_texto
 
 # Colunas lidas para o prompt e os sinais (as opcionais entram só se o arquivo as tiver).
 COLUNAS_OBRIGATORIAS = (
@@ -71,6 +72,9 @@ def montar_filtro(f: FiltroSQL) -> tuple[str, list[Any]]:
     if f.ufs:
         condicoes.append(f"uf IN ({', '.join('?' * len(f.ufs))})")
         params += f.ufs
+    if f.municipios:
+        condicoes.append(f"strip_accents(upper(municipio)) IN ({', '.join('?' * len(f.municipios))})")
+        params += [normalizar_texto(m).upper() for m in f.municipios]
     if f.matriz_filial:
         condicoes.append("matriz_filial = ?")
         params.append(f.matriz_filial)
@@ -124,6 +128,27 @@ def dados_basicos(arquivo: ArquivoDoMes, cnpjs: list[str]) -> dict[str, dict[str
         return {linha[0]: dict(zip(nomes, linha, strict=True)) for linha in cur.fetchall()}
     finally:
         con.close()
+
+
+def exemplos(arquivo: ArquivoDoMes, perfil: Perfil, n: int = 8) -> list[dict[str, Any]]:
+    """Algumas empresas do funil, para a prévia de um perfil novo (só dados cadastrais públicos)."""
+    where, params = montar_filtro(perfil.filtro_sql)
+    con = duckdb.connect()
+    try:
+        cur = con.execute(
+            f"SELECT coalesce(nome_fantasia, razao_social) AS nome, municipio, uf, cnae_principal_descricao AS atividade, "
+            f"data_inicio_atividade, (opcao_mei IS TRUE OR porte = 'MEI') AS mei FROM read_parquet(?) WHERE {where} "
+            f"ORDER BY hash(cnpj) LIMIT ?", [arquivo.parquet.as_posix(), *params, n])
+        nomes = [d[0] for d in cur.description]
+        linhas = [dict(zip(nomes, linha, strict=True)) for linha in cur.fetchall()]
+    finally:
+        con.close()
+    for linha in linhas:  # nome de MEI é o nome do titular: não vai para a prévia
+        if linha.pop("mei"):
+            linha["nome"] = "(MEI)"
+        if linha["data_inicio_atividade"] is not None:
+            linha["data_inicio_atividade"] = linha["data_inicio_atividade"].isoformat()
+    return linhas
 
 
 def descricoes_cnae(arquivo: ArquivoDoMes) -> dict[str, str]:

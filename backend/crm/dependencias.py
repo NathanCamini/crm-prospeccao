@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.routing import APIRoute
@@ -51,7 +51,22 @@ class Contexto:
     usuario: Usuario
     empresa_id: int
     empresa_nome: str
-    perfis: list[str]
+    perfis: list[str]                 # perfis que a empresa vê; vazio = todos, menos `perfis_ocultos`
+    perfis_ocultos: list[str] = field(default_factory=list)  # produtos de outras empresas: nunca aparecem
+
+    def ve_perfil(self, perfil_id: str | None) -> bool:
+        if self.perfis:
+            return perfil_id in self.perfis
+        return perfil_id not in self.perfis_ocultos
+
+    def condicao_perfis(self, coluna: str, params: dict) -> str:
+        """Condição SQL que limita `coluna` (um perfil_id) aos perfis que a empresa vê."""
+        lista, operador = (self.perfis, "IN") if self.perfis else (self.perfis_ocultos, "NOT IN")
+        if not lista:
+            return "1"
+        nomes = [f":vperfil{i}" for i in range(len(lista))]
+        params |= {f"vperfil{i}": v for i, v in enumerate(lista)}
+        return f"{coluna} {operador} ({', '.join(nomes)})"
 
     @property
     def e_admin(self) -> bool:
@@ -155,7 +170,13 @@ def contexto(request: Request, u: Usuario = Depends(usuario_liberado), conn: sql
     if not empresa:
         raise HTTPException(409, "Escolha uma empresa cliente para trabalhar.")
     ator(request).empresa_id = empresa["id"]
-    return Contexto(usuario=u, empresa_id=empresa["id"], empresa_nome=empresa["nome"], perfis=json.loads(empresa["perfis"]))
+    # Perfis escolhidos pelo superadmin + produtos que a própria empresa descreveu (inclusive os removidos,
+    # para os leads já trabalhados continuarem visíveis). Produto de outra empresa nunca aparece.
+    proprios = [r[0] for r in conn.execute("SELECT perfil_id FROM produto WHERE empresa_id = ?", (empresa["id"],))]
+    alheios = [r[0] for r in conn.execute("SELECT perfil_id FROM produto WHERE empresa_id != ?", (empresa["id"],))]
+    perfis = sorted(set(json.loads(empresa["perfis"])) | set(proprios))
+    return Contexto(usuario=u, empresa_id=empresa["id"], empresa_nome=empresa["nome"], perfis=perfis,
+                    perfis_ocultos=alheios)
 
 
 def exige_admin(ctx: Contexto = Depends(contexto)) -> Contexto:

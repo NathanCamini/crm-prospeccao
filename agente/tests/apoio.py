@@ -96,7 +96,8 @@ def montar_cfg(tmp: Path, perfil_yaml: str | None = None) -> AgenteConfig:
         (perfis / "teste_hotel.yaml").write_text(perfil_yaml, encoding="utf-8")
     return AgenteConfig(novas_dir=tmp / "modulo1" / "exportacoes" / "novas", dados_dir=tmp / "dados",
                         saida_dir=tmp / "saida", perfis_dir=perfis, schema_dir=RAIZ / "schema",
-                        modelo_triagem="gemini-2.5-flash-lite", modelo_revisao="gemini-3.8-flash")
+                        modelo_triagem="gemini-2.5-flash-lite", modelo_revisao="gemini-3.8-flash",
+                        janela_leads_dias=0)  # sem janela: as datas fixas dos testes não envelhecem
 
 
 def com_modelos(cfg: AgenteConfig, triagem: str, revisao: str) -> AgenteConfig:

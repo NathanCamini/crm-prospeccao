@@ -76,27 +76,36 @@ def _estado(conn: sqlite3.Connection, ctx: Contexto, chave: str) -> sqlite3.Row 
     return conn.execute("SELECT * FROM lead_estado WHERE empresa_id = ? AND chave = ?", (ctx.empresa_id, chave)).fetchone()
 
 
+def _do_lead(conn: sqlite3.Connection, ctx: Contexto, chave: str) -> sqlite3.Row | None:
+    p: dict = {"emp": ctx.empresa_id, "chave": chave}
+    return conn.execute(f"SELECT l.*, {COLUNAS_VP} {_from(ctx, p)} WHERE l.chave = :chave", p).fetchone()
+
+
 def carregar_lead(conn: sqlite3.Connection, ctx: Contexto, chave: str, cfg: Config, m3: Modulo3) -> sqlite3.Row:
     """Lead visível para a empresa; 404 para qualquer outro (inclusive manual de outra empresa)."""
     chave = normalizar_chave(chave)
-    linha = conn.execute("SELECT * FROM lead WHERE chave = ?", (chave,)).fetchone()
+    linha = _do_lead(conn, ctx, chave)
     if linha is None and len(chave) == 14 and buscar_e_gravar(conn, m3, chave):
-        linha = conn.execute("SELECT * FROM lead WHERE chave = ?", (chave,)).fetchone()
+        linha = _do_lead(conn, ctx, chave)
     if linha is None:
         raise HTTPException(404, "Lead não encontrado.")
     if linha["origem"] == "manual":
         if linha["empresa_id"] != ctx.empresa_id:
             raise HTTPException(404, "Lead não encontrado.")
         return linha
-    if ctx.perfis and linha["perfil_id"] not in ctx.perfis:
+    if linha["vp_perfil"] is None:  # nenhum perfil que a empresa vê (ex.: produto de outra empresa cliente)
         raise HTTPException(404, "Lead não encontrado.")
-    if (linha["ausente_desde"] or not linha["e_alvo"]) and _estado(conn, ctx, chave) is None:
+    if (linha["ausente_desde"] or not linha["vp_alvo"]) and _estado(conn, ctx, chave) is None:
         raise HTTPException(404, "Lead não encontrado.")
     return linha
 
 
 def dados_do_lead(linha: sqlite3.Row) -> dict:
+    """O lead como a empresa o vê: com a classificação do perfil dela, nunca as dos produtos de outras empresas."""
     lead = json.loads(linha["dados"])
+    lead.pop("classificacoes", None)
+    if "vp_classificacao" in linha.keys() and linha["vp_classificacao"]:
+        lead["classificacao"] = json.loads(linha["vp_classificacao"])
     lead["chave"] = linha["chave"]
     lead["origem"] = linha["origem"]
     lead["ausente_desde"] = linha["ausente_desde"]
@@ -165,15 +174,24 @@ def mudar_estagio(request: Request, conn: sqlite3.Connection, ctx: Contexto, cha
 
 # ================================================================== lista, resumo e exportação
 
-def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, dict]:
+def _from(ctx: Contexto, p: dict) -> str:
+    """lead + estado da empresa + a classificação visível (`vp`): a melhor entre os perfis que a empresa vê."""
+    return f"""FROM lead l LEFT JOIN lead_estado e ON e.empresa_id = :emp AND e.chave = l.chave
+        LEFT JOIN (SELECT lp.chave, lp.perfil_id AS vp_perfil, lp.score AS vp_score, lp.e_alvo AS vp_alvo,
+                          lp.classificacao AS vp_classificacao, MAX(lp.e_alvo * 1000 + COALESCE(lp.score, 0)) AS vp_ordem
+                   FROM lead_perfil lp WHERE {ctx.condicao_perfis("lp.perfil_id", p)} GROUP BY lp.chave) vp
+            ON vp.chave = l.chave"""
+
+
+COLUNAS_VP = "vp.vp_perfil, vp.vp_score, vp.vp_alvo, vp.vp_classificacao"
+
+
+def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, str, dict]:
     p: dict = {"emp": ctx.empresa_id, "eu": ctx.nome}
-    perfis = ""
-    if ctx.perfis:
-        nomes = [f":perfil{i}" for i in range(len(ctx.perfis))]
-        p |= {f"perfil{i}": v for i, v in enumerate(ctx.perfis)}
-        perfis = f" AND l.perfil_id IN ({', '.join(nomes)})"
+    origem = _from(ctx, p)
     conds = [
-        f"""((l.origem = 'modulo3'{perfis} AND ((l.e_alvo = 1 AND l.ausente_desde IS NULL) OR e.chave IS NOT NULL))
+        """((l.origem = 'modulo3' AND vp.chave IS NOT NULL
+             AND ((vp.vp_alvo = 1 AND l.ausente_desde IS NULL) OR e.chave IS NOT NULL))
             OR (l.origem = 'manual' AND l.empresa_id = :emp))"""
     ]
     if not ctx.e_admin:
@@ -182,7 +200,9 @@ def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, dict]:
         conds.append("l.origem = :origem")
         p["origem"] = "modulo3" if f.origem == "agente" else "manual"
     if f.perfil_id:
-        conds.append("l.perfil_id = :perfil")
+        if not ctx.ve_perfil(f.perfil_id):
+            conds.append("0")
+        conds.append("EXISTS (SELECT 1 FROM lead_perfil x WHERE x.chave = l.chave AND x.perfil_id = :perfil)")
         p["perfil"] = f.perfil_id
     if f.uf:
         nomes = [f":uf{i}" for i in range(len(f.uf))]
@@ -192,7 +212,7 @@ def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, dict]:
         conds.append("l.municipio LIKE :municipio")
         p["municipio"] = f"%{m}%"
     if f.score_min:
-        conds.append("COALESCE(l.score, 0) >= :score")
+        conds.append("COALESCE(vp.vp_score, l.score, 0) >= :score")
         p["score"] = f.score_min
     if f.texto and (t := normalizar_busca(f.texto).strip()):
         conds.append("(l.busca LIKE :texto OR l.chave LIKE :texto_chave)")
@@ -207,10 +227,9 @@ def _onde(ctx: Contexto, f: FiltroCRM, com_estagio: bool) -> tuple[str, dict]:
     elif f.responsavel:
         conds.append("e.responsavel = :resp")
         p["resp"] = f.responsavel.strip().lower()
-    return " AND ".join(conds), p
+    return origem, " AND ".join(conds), p
 
 
-FROM = "FROM lead l LEFT JOIN lead_estado e ON e.empresa_id = :emp AND e.chave = l.chave"
 EXTRAS = """,
     (SELECT a.criado_em FROM atividade a WHERE a.empresa_id = :emp AND a.chave = l.chave ORDER BY a.id DESC LIMIT 1) AS ultima_em,
     (SELECT a.tipo FROM atividade a WHERE a.empresa_id = :emp AND a.chave = l.chave ORDER BY a.id DESC LIMIT 1) AS ultima_tipo,
@@ -219,7 +238,7 @@ EXTRAS = """,
     (SELECT t.titulo FROM tarefa t WHERE t.empresa_id = :emp AND t.chave = l.chave AND t.concluida_em IS NULL
         ORDER BY t.vence_em, t.id LIMIT 1) AS proximo_titulo"""
 ORDENS = {
-    "score": "COALESCE(l.score, -1) DESC, l.nome COLLATE NOCASE",
+    "score": "COALESCE(vp.vp_score, l.score, -1) DESC, l.nome COLLATE NOCASE",
     "abertura": "l.data_abertura IS NULL, l.data_abertura DESC, l.nome COLLATE NOCASE",
     "nome": "l.nome COLLATE NOCASE",
     "atividade": "ultima_em IS NULL, ultima_em DESC",
@@ -229,10 +248,11 @@ ORDENS = {
 
 
 def _linhas(conn: sqlite3.Connection, ctx: Contexto, f: FiltroCRM, limite: int, deslocamento: int) -> tuple[int, list[sqlite3.Row]]:
-    onde, p = _onde(ctx, f, com_estagio=True)
-    total = conn.execute(f"SELECT COUNT(*) {FROM} WHERE {onde}", p).fetchone()[0]
+    origem, onde, p = _onde(ctx, f, com_estagio=True)
+    total = conn.execute(f"SELECT COUNT(*) {origem} WHERE {onde}", p).fetchone()[0]
     linhas = conn.execute(
-        f"SELECT l.*, e.estagio, e.responsavel {EXTRAS} {FROM} WHERE {onde} ORDER BY {ORDENS[f.ordenar]} LIMIT :lim OFFSET :off",
+        f"SELECT l.*, {COLUNAS_VP}, e.estagio, e.responsavel {EXTRAS} {origem} WHERE {onde} "
+        f"ORDER BY {ORDENS[f.ordenar]} LIMIT :lim OFFSET :off",
         p | {"lim": limite, "off": deslocamento},
     ).fetchall()
     return total, linhas
@@ -286,9 +306,9 @@ def buscar(
 
 @router.post("/resumo")
 def resumo(f: FiltroCRM, conn: sqlite3.Connection = Depends(db), ctx: Contexto = Depends(contexto)) -> dict:
-    onde, p = _onde(ctx, f, com_estagio=False)
+    origem, onde, p = _onde(ctx, f, com_estagio=False)
     contagem = {e: 0 for e in ESTAGIOS}
-    for r in conn.execute(f"SELECT COALESCE(e.estagio, 'novo') AS st, COUNT(*) AS n {FROM} WHERE {onde} GROUP BY st", p):
+    for r in conn.execute(f"SELECT COALESCE(e.estagio, 'novo') AS st, COUNT(*) AS n {origem} WHERE {onde} GROUP BY st", p):
         contagem[r["st"]] = r["n"]
     sinc = _ultima_sincronizacao(conn)
     return {
@@ -297,6 +317,11 @@ def resumo(f: FiltroCRM, conn: sqlite3.Connection = Depends(db), ctx: Contexto =
         "fonte": sinc["fonte"] if sinc else None,
         "mes_referencia": conn.execute("SELECT MAX(mes_referencia) FROM lead WHERE origem = 'modulo3'").fetchone()[0],
     }
+
+
+def _pontuacao(r: sqlite3.Row) -> int | str:
+    score = r["vp_score"] if r["vp_score"] is not None else r["score"]
+    return "" if score is None else score
 
 
 def csv_resposta(nome: str, cabecalho: list[str], linhas: list[list]) -> Response:
@@ -321,7 +346,7 @@ def exportar(f: FiltroCRM, request: Request, conn: sqlite3.Connection = Depends(
         receita = lead.get("contato_receita") or {}
         corpo.append([
             r["chave"], lead.get("cnpj") or "", r["nome"], lead.get("razao_social") or "", r["municipio"] or "", r["uf"] or "",
-            r["bairro"] or "", r["perfil_id"] or "", "" if r["score"] is None else r["score"], r["estagio"] or "novo",
+            r["bairro"] or "", r["vp_perfil"] or "", _pontuacao(r), r["estagio"] or "novo",
             r["responsavel"] or "", "manual" if r["origem"] == "manual" else "agente",
             f"{receita.get('ddd_1') or ''}{receita.get('telefone_1') or ''}".strip(), (receita.get("email") or "").strip(),
             r["proximo_em"] or "", r["proximo_titulo"] or "", (r["ultima_em"] or "")[:10],

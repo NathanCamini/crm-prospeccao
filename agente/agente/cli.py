@@ -1,6 +1,7 @@
 """Linha de comando do agente classificador (módulo 2).
 
     agente perfis
+    agente checar [--perfil P] [--lote]          chave, modelos e schema com uma empresa fictícia
     agente validar --mes 2026-10
     agente classificar --mes 2026-10 --perfil amenities_hotel [--modo lote|online] [--aguardar]
     agente lotes
@@ -10,6 +11,9 @@
     agente revisao-mensal --mes 2026-10 --perfil amenities_hotel --saida revisao.csv
     agente custos [--mes 2026-10]
     agente exportar-crm [--perfil amenities_hotel] [--mes 2026-10]
+    agente rotina [--aguardar] [--repetir-horas 6]  mês novo do módulo 1 → classifica todos os perfis → CSV
+    agente servir [--porta 9000]                 perguntas e produtos das empresas clientes (via módulo 3)
+    agente perguntar "texto" [--contexto lead.json]
 """
 
 from __future__ import annotations
@@ -30,7 +34,8 @@ from agente.contrato import ContratoInvalidoError, validar_mes
 from agente.exportacao import ARQUIVO_CRM, exportar_crm
 from agente.funil import FunilGrandeError, contar
 from agente.llm import ClienteGemini
-from agente.perfil import PerfilInvalidoError, carregar_perfil, listar_ids
+from agente import catalogo
+from agente.perfil import PerfilInvalidoError
 from agente.servico import MODOS, Classificador
 from agente.sinais import carregar_redes, socios_pj
 
@@ -44,6 +49,10 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     sub = p.add_subparsers(dest="comando", required=True)
 
     sub.add_parser("perfis", help="Lista e valida os perfis em perfis/")
+
+    ck = sub.add_parser("checar", help="Testa chave, modelos e schema do perfil com uma empresa fictícia (centavos)")
+    ck.add_argument("--perfil", help="Perfil a testar (padrão: o exemplo perfis/exemplos/amenities_hotel.yaml)")
+    ck.add_argument("--lote", action="store_true", help="Testa também a API de lote (espera até 1 h)")
 
     v = sub.add_parser("validar", help="Confere o arquivo do mês contra o contrato e mostra o funil de cada perfil")
     v.add_argument("--mes", required=True)
@@ -89,9 +98,23 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     cu.add_argument("--mes")
 
     ex = sub.add_parser("exportar-crm", help="Grava o CSV que o módulo 3 entrega ao CRM (versão vigente de cada perfil)")
-    ex.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos os classificados")
+    ex.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos os ativos")
     ex.add_argument("--mes", help="Só este mês. Padrão: todos os meses classificados")
     ex.add_argument("--saida", type=Path, help=f"Padrão: AGENTE_SAIDA_DIR/{ARQUIVO_CRM}")
+
+    ro = sub.add_parser("rotina", help="Rotina do mês: classifica o mês mais novo em todos os perfis e exporta o CSV")
+    ro.add_argument("--mes", help="Mês AAAA-MM (padrão: o mais recente publicado pelo módulo 1)")
+    ro.add_argument("--perfil", action="append", help="Só este perfil (pode repetir). Padrão: todos")
+    ro.add_argument("--aguardar", action="store_true", help="Espera os lotes terminarem (até 26 h por perfil)")
+    ro.add_argument("--repetir-horas", type=float, help="Fica rodando e repete a cada N horas (para o agendador)")
+
+    sv = sub.add_parser("servir", help="API do agente para o módulo 3: perguntas do CRM e produtos das empresas clientes")
+    sv.add_argument("--endereco", default="0.0.0.0")
+    sv.add_argument("--porta", type=int, default=9000)
+
+    pg = sub.add_parser("perguntar", help="Faz uma pergunta ao agente pelo terminal (para testar)")
+    pg.add_argument("pergunta")
+    pg.add_argument("--contexto", type=Path, help="JSON de um lead (contrato v1) para perguntar sobre ele")
     return p.parse_args(argv)
 
 
@@ -125,18 +148,27 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
     banco = lambda: ClassificacaoStore(cfg.banco)  # noqa: E731 — só os comandos que usam o banco o abrem
     try:
         if args.comando == "perfis":
-            for perfil_id in listar_ids(cfg.perfis_dir):
+            store = banco() if cfg.banco.exists() else None
+            for perfil_id in catalogo.ids_ativos(cfg, store):
                 try:
-                    p = carregar_perfil(cfg.perfis_dir, perfil_id)
-                    print(f"{p.id} v{p.versao}: {p.produto}")
+                    p = catalogo.carregar(cfg, store, perfil_id)
+                    origem = f" (empresa cliente {p.dono})" if p.dono else ""
+                    print(f"{p.id} v{p.versao}: {p.rotulo}{origem}")
                 except PerfilInvalidoError as exc:
                     print(f"{perfil_id}: INVÁLIDO — {exc}")
             return 0
+        if args.comando == "checar":
+            from agente.checagem import checar
+
+            ok, linhas = checar(cfg, fabrica_cliente(cfg), args.perfil, lote=args.lote)
+            print("\n".join(linhas))
+            return 0 if ok else 1
         if args.comando == "validar":
             arquivo = validar_mes(cfg.novas_dir, args.mes, cfg.schema_dir)
             print(f"{arquivo.parquet}: {arquivo.total_linhas} empresas, contrato v{arquivo.contrato.versao} ok")
-            for perfil_id in listar_ids(cfg.perfis_dir):
-                perfil = carregar_perfil(cfg.perfis_dir, perfil_id)
+            store = banco() if cfg.banco.exists() else None
+            for perfil_id in catalogo.ids_ativos(cfg, store):
+                perfil = catalogo.carregar(cfg, store, perfil_id)
                 print(f"  {perfil.id} v{perfil.versao}: {contar(arquivo, perfil)} passam no filtro SQL "
                       f"(limite {perfil.limite_candidatos})")
             return 0
@@ -165,7 +197,7 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
             return 0
         if args.comando == "amostrar-rotulos":
             arquivo = validar_mes(cfg.novas_dir, args.mes, cfg.schema_dir)
-            n = amostra_para_rotular(arquivo, carregar_perfil(cfg.perfis_dir, args.perfil), args.n, args.saida,
+            n = amostra_para_rotular(arquivo, catalogo.carregar(cfg, banco(), args.perfil), args.n, args.saida,
                                      args.semente)
             print(f"{n} empresas em {args.saida}. Preencha e_alvo_humano (sim/nao) e, se souber, e_franquia_humano.")
             return 0
@@ -183,14 +215,46 @@ def main(argv: list[str] | None = None, fabrica_cliente: FabricaCliente = _clien
         if args.comando == "custos":
             _tabela(banco().custos(args.mes))
             return 0
+        if args.comando == "rotina":
+            from agente.rotina import executar_rotina, repetir
+
+            store = banco()
+            classificador = _classificador(cfg, store, fabrica_cliente)
+            passo = lambda: executar_rotina(cfg, store, classificador, args.mes, args.perfil,  # noqa: E731
+                                            aguardar=args.aguardar)
+            if args.repetir_horas:
+                repetir(passo, args.repetir_horas)
+                return 0
+            resumo = passo()
+            print("\n".join(resumo.linhas()))
+            return 2 if resumo.erro else 0
+        if args.comando == "servir":
+            from agente.api import montar_servicos, servir
+
+            servicos = montar_servicos(cfg, fabrica_cliente,
+                                       lambda c, store, cliente: _classificador(c, store, lambda _: cliente))
+            servir(servicos, args.endereco, args.porta)
+            return 0
+        if args.comando == "perguntar":
+            from agente.perguntas import Assistente
+
+            contexto = json.loads(args.contexto.read_text(encoding="utf-8")) if args.contexto else None
+            print(Assistente(cfg, fabrica_cliente(cfg)).responder(args.pergunta, contexto))
+            return 0
         if args.comando == "exportar-crm":
             saida = args.saida or cfg.saida_dir / ARQUIVO_CRM
-            r = exportar_crm(banco(), cfg.novas_dir, cfg.schema_dir, saida, args.perfil, args.mes)
+            store = banco()
+            nomes = catalogo.rotulos(cfg, store)  # padrão: só os perfis ativos (perfil desativado sai do CSV)
+            perfis = args.perfil or sorted(set(store.perfis_classificados()) & set(nomes))
+            r = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, perfis, args.mes, nomes=nomes,
+                             janela_dias=cfg.janela_leads_dias)
             print(f"{r.linhas} empresas ({r.alvos} alvos) de {', '.join(r.perfis)} · meses {', '.join(r.meses)} "
                   f"→ {saida}")
             for mes, n in r.puladas.items():
-                print(f"  atenção: {n} classificações de {mes} ficaram fora (arquivo do mês ausente ou alterado)")
-            print("O módulo 3 lê o CSV ao subir: docker compose restart modulo3")
+                print(f"  atenção: {n} classificações de {mes} ficaram fora (sem cadastro guardado)")
+            if r.fora_da_janela:
+                print(f"  {r.fora_da_janela} empresas abertas há mais de {cfg.janela_leads_dias} dias ficaram fora")
+            print("O módulo 3 relê o CSV sozinho; o CRM copia os leads na próxima sincronização.")
             return 0
     except (ContratoInvalidoError, PerfilInvalidoError, FunilGrandeError, RuntimeError, ValueError) as exc:
         log.error("%s", exc)

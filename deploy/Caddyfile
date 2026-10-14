@@ -1,0 +1,8 @@
+# HTTPS na frente do CRM (perfil "https" do docker-compose.yml).
+# O certificado é emitido e renovado sozinho para CRM_DOMINIO (Let's Encrypt).
+{$CRM_DOMINIO} {
+	encode zstd gzip
+	# O Caddy ignora X-Forwarded-For vindo do cliente e grava o IP real; o nginx confia nele só nesta rede.
+	reverse_proxy web:8080
+	header Strict-Transport-Security "max-age=31536000"
+}

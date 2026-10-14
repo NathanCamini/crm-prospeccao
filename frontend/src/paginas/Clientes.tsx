@@ -5,7 +5,7 @@ import { api, ApiErro } from "../api";
 import { useAviso } from "../componentes/Aviso";
 import { dataHora, relativo } from "../formato";
 import { useSessao } from "../sessao";
-import type { EmpresaCliente, Perfil } from "../tipos";
+import type { EmpresaCliente } from "../tipos";
 import { AvisoCredencial, senhaProvisoria } from "./Equipe";
 
 /** Empresas que usam o sistema. Só o administrador do sistema vê esta tela. */
@@ -14,7 +14,6 @@ export default function Clientes() {
   const aviso = useAviso();
   const navegar = useNavigate();
   const [empresas, setEmpresas] = useState<EmpresaCliente[]>([]);
-  const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [editando, setEditando] = useState<EmpresaCliente | "nova" | null>(null);
   const [credencial, setCredencial] = useState<{ nome: string; usuario: string; senha: string } | null>(null);
 
@@ -24,7 +23,6 @@ export default function Clientes() {
 
   useEffect(() => {
     carregar();
-    api.todosPerfis().then(setPerfis, () => setPerfis([]));
   }, [carregar]);
 
   async function entrarNa(e: EmpresaCliente) {
@@ -42,8 +40,6 @@ export default function Clientes() {
     atualizarUsuario(await api.eu());
     if (cred) setCredencial(cred);
   }
-
-  const nomePerfil = (id: string) => perfis.find((p) => p.id === id)?.nome ?? id;
 
   return (
     <div className="pagina">
@@ -65,7 +61,6 @@ export default function Clientes() {
       {editando !== null && (
         <FormEmpresa
           empresa={editando === "nova" ? null : editando}
-          perfis={perfis}
           aoCancelar={() => setEditando(null)}
           aoSalvar={depoisDeSalvar}
         />
@@ -83,7 +78,7 @@ export default function Clientes() {
             <thead>
               <tr>
                 <th>Empresa</th>
-                <th>Perfis de lead</th>
+                <th>Produtos</th>
                 <th>Administradores</th>
                 <th className="num">Pessoas</th>
                 <th className="num">Em trabalho</th>
@@ -106,7 +101,7 @@ export default function Clientes() {
                       {!e.ativa && <span className="marcador marcador-alerta">desativada</span>}
                     </span>
                   </td>
-                  <td>{e.perfis.length ? e.perfis.map(nomePerfil).join(", ") : <span className="mudo">todos</span>}</td>
+                  <td>{e.produtos ?? <span className="mudo">nenhum ainda</span>}</td>
                   <td>{e.admins ?? <span className="mudo">nenhum</span>}</td>
                   <td className="num">{e.pessoas}</td>
                   <td className="num">{e.leads_trabalhados}</td>
@@ -188,27 +183,20 @@ function PainelSincronizacao() {
 
 function FormEmpresa({
   empresa,
-  perfis,
   aoSalvar,
   aoCancelar,
 }: {
   empresa: EmpresaCliente | null;
-  perfis: Perfil[];
   aoSalvar: (cred?: { nome: string; usuario: string; senha: string }) => void;
   aoCancelar: () => void;
 }) {
   const [nome, setNome] = useState(empresa?.nome ?? "");
   const [documento, setDocumento] = useState(empresa?.documento ?? "");
-  const [escolhidos, setEscolhidos] = useState<string[]>(empresa?.perfis ?? []);
   const [ativa, setAtiva] = useState(empresa?.ativa ?? true);
   const [adminNome, setAdminNome] = useState("");
   const [adminUsuario, setAdminUsuario] = useState("");
   const [senha] = useState(senhaProvisoria);
   const [erro, setErro] = useState<string | null>(null);
-
-  function alternar(id: string) {
-    setEscolhidos((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }
 
   async function enviar(e: FormEvent) {
     e.preventDefault();
@@ -216,13 +204,13 @@ function FormEmpresa({
     try {
       if (empresa) {
         if (empresa.ativa && !ativa && !window.confirm(`Desativar ${empresa.nome}? Todas as pessoas dela saem do sistema na hora.`)) return;
-        await api.alterarEmpresaCliente(empresa.id, { nome, documento, perfis: escolhidos, ativa });
+        await api.alterarEmpresaCliente(empresa.id, { nome, documento, ativa });
         aoSalvar();
       } else {
         const r = await api.criarEmpresaCliente({
           nome,
           documento: documento || undefined,
-          perfis: escolhidos,
+          perfis: [],
           admin: { usuario: adminUsuario, nome_exibicao: adminNome, senha_inicial: senha },
         });
         aoSalvar({ nome: adminNome, usuario: r.admin, senha });
@@ -246,18 +234,10 @@ function FormEmpresa({
         </label>
       </div>
 
-      <fieldset className="perfis">
-        <legend>Leads que esta empresa recebe</legend>
-        {perfis.map((p) => (
-          <label key={p.id} className="marcar">
-            <input type="checkbox" checked={escolhidos.includes(p.id)} onChange={() => alternar(p.id)} />
-            <span>
-              {p.nome} <span className="mudo">({p.total_alvos} alvos na base atual)</span>
-            </span>
-          </label>
-        ))}
-        <p className="nota">Sem nenhum marcado, a empresa vê todos os perfis.</p>
-      </fieldset>
+      <p className="nota">
+        Os leads desta empresa vêm dos produtos que o administrador dela descrever em <strong>Produtos</strong>: o
+        agente transforma cada descrição no filtro de empresas novas.
+      </p>
 
       {empresa ? (
         <label className="marcar">

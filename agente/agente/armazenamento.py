@@ -70,6 +70,31 @@ _MIGRACOES: list[str] = [
         PRIMARY KEY (lote_id, cnpj)
     );
     """,
+    # 2: perfis descritos pelas empresas clientes no CRM (os do repositório continuam em perfis/*.yaml)
+    """
+    CREATE TABLE IF NOT EXISTS perfil_cliente (
+        id TEXT PRIMARY KEY,
+        dono TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        versao INTEGER NOT NULL,
+        perfil_json TEXT NOT NULL,
+        ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
+        execucao_json TEXT,
+        criado_em TEXT NOT NULL,
+        atualizado_em TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ix_perfil_cliente_dono ON perfil_cliente (dono, ativo);
+    """,
+    # 3: dados cadastrais e contato da Receita de quem passou no funil. O módulo 1 guarda só o arquivo do mês
+    # atual; o CSV do CRM continua tendo os leads dos meses anteriores a partir daqui.
+    """
+    CREATE TABLE IF NOT EXISTS empresa_cadastro (
+        cnpj TEXT PRIMARY KEY,
+        mes_referencia TEXT NOT NULL,
+        dados_json TEXT NOT NULL,
+        atualizado_em TEXT NOT NULL
+    );
+    """,
 ]
 ESTADOS_ABERTOS = ("criando", "enviado")
 
@@ -103,6 +128,14 @@ class Lote:
     job: str | None
     estado: str
     total: int
+
+
+def _perfil_dict(r: sqlite3.Row) -> dict[str, Any]:
+    d = dict(r)
+    d["perfil"] = json.loads(d.pop("perfil_json"))
+    d["execucao"] = json.loads(d.pop("execucao_json")) if d.get("execucao_json") else None
+    d["ativo"] = bool(d["ativo"])
+    return d
 
 
 def _agora() -> str:
@@ -203,6 +236,73 @@ class ClassificacaoStore:
     def perfis_classificados(self) -> list[str]:
         with self.conexao() as con:
             return [r[0] for r in con.execute("SELECT DISTINCT perfil_id FROM classificacao ORDER BY 1")]
+
+    # ---------------------------------------------------------------- cadastro (para o CSV do CRM)
+    def gravar_cadastro(self, mes: str, dados: dict[str, dict[str, Any]]) -> None:
+        agora = _agora()
+        with self.conexao() as con:
+            con.executemany(
+                """INSERT INTO empresa_cadastro (cnpj, mes_referencia, dados_json, atualizado_em) VALUES (?, ?, ?, ?)
+                   ON CONFLICT (cnpj) DO UPDATE SET mes_referencia = excluded.mes_referencia,
+                     dados_json = excluded.dados_json, atualizado_em = excluded.atualizado_em
+                   WHERE excluded.mes_referencia >= empresa_cadastro.mes_referencia""",
+                [(cnpj, mes, json.dumps(d, ensure_ascii=False, default=str), agora) for cnpj, d in dados.items()])
+
+    def cadastro(self, cnpjs: list[str]) -> dict[str, dict[str, Any]]:
+        resultado: dict[str, dict[str, Any]] = {}
+        with self.conexao() as con:
+            for i in range(0, len(cnpjs), 900):
+                lote = cnpjs[i:i + 900]
+                for r in con.execute(f"SELECT cnpj, dados_json FROM empresa_cadastro WHERE cnpj IN ({','.join('?' * len(lote))})",
+                                     lote):
+                    resultado[r["cnpj"]] = json.loads(r["dados_json"])
+        return resultado
+
+    # ---------------------------------------------------------------- perfis das empresas clientes
+    def salvar_perfil_cliente(self, perfil_id: str, dono: str, descricao: str, versao: int,
+                              perfil_json: str) -> None:
+        agora = _agora()
+        with self.conexao() as con:
+            con.execute(
+                """INSERT INTO perfil_cliente (id, dono, descricao, versao, perfil_json, ativo, criado_em, atualizado_em)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                   ON CONFLICT (id) DO UPDATE SET descricao = excluded.descricao, versao = excluded.versao,
+                     perfil_json = excluded.perfil_json, ativo = 1, execucao_json = NULL,
+                     atualizado_em = excluded.atualizado_em""",
+                (perfil_id, dono, descricao, versao, perfil_json, agora, agora))
+
+    def perfil_cliente(self, perfil_id: str) -> dict[str, Any] | None:
+        with self.conexao() as con:
+            r = con.execute("SELECT * FROM perfil_cliente WHERE id = ?", (perfil_id,)).fetchone()
+        return _perfil_dict(r) if r else None
+
+    def perfis_cliente(self, dono: str | None = None, ativos: bool = True) -> list[dict[str, Any]]:
+        condicoes, params = [], []
+        if dono is not None:
+            condicoes.append("dono = ?")
+            params.append(dono)
+        if ativos:
+            condicoes.append("ativo = 1")
+        where = f"WHERE {' AND '.join(condicoes)}" if condicoes else ""
+        with self.conexao() as con:
+            return [_perfil_dict(r) for r in con.execute(
+                f"SELECT * FROM perfil_cliente {where} ORDER BY criado_em, id", params)]
+
+    def desativar_perfil_cliente(self, perfil_id: str) -> bool:
+        with self.conexao() as con:
+            return con.execute("UPDATE perfil_cliente SET ativo = 0, atualizado_em = ? WHERE id = ? AND ativo = 1",
+                               (_agora(), perfil_id)).rowcount > 0
+
+    def registrar_execucao_perfil(self, perfil_id: str, execucao: dict[str, Any]) -> None:
+        with self.conexao() as con:
+            con.execute("UPDATE perfil_cliente SET execucao_json = ? WHERE id = ?",
+                        (json.dumps(execucao, ensure_ascii=False), perfil_id))
+
+    def alvos_por_perfil(self) -> dict[str, int]:
+        """Alvos na versão vigente de cada perfil."""
+        with self.conexao() as con:
+            return {r[0]: r[1] for r in con.execute(
+                "SELECT perfil_id, sum(e_alvo) FROM classificacao_vigente GROUP BY perfil_id")}
 
     # ---------------------------------------------------------------- lotes
     def criar_lote(self, perfil_id: str, perfil_versao: int, mes: str, etapa: str, modelo: str, prompt_hash: str,

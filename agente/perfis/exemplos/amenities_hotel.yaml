@@ -1,19 +1,23 @@
-# Perfil de cliente ideal: um arquivo por produto. Mudou critério ou filtro? Suba a `versao`:
-# as empresas são reclassificadas com o perfil novo e as classificações antigas ficam no histórico.
+# EXEMPLO de perfil (não é classificado: só os arquivos direto em perfis/ entram na rotina).
+# No uso normal, cada empresa cliente descreve o que vende no CRM (tela Produtos) e o agente monta o
+# perfil sozinho, neste mesmo formato. Este arquivo serve de referência e para `agente checar`.
+# Mudou critério ou filtro? Suba a `versao`: as empresas são reclassificadas e as antigas ficam no histórico.
 id: amenities_hotel
-versao: 3
+versao: 4
 produto: "Kit de amenities (sabonete, shampoo) para hotelaria"
 
+# Só o que define o mercado do produto: atividade e situação. Porte e capital não cortam aqui:
+# unidades de rede costumam abrir com capital baixo (R$ 4.600 a R$ 50.000 em 2026-09). O modelo pesa
+# esses dados nos critérios abaixo.
 filtro_sql:            # etapa barata, roda no DuckDB
   cnae_prefixos: ["5510", "5590"]   # hotéis, apart-hotéis, motéis, pousadas e outros alojamentos
   situacao: [ATIVA]
-  capital_social_min: 100000
-  excluir_mei: true
 
 criterios_llm:          # etapa cara, só no que passou
   - "É hospedagem com quartos (não só eventos ou restaurante)?"
   - "É franquia ou bandeira de rede? Qual?"
   - "Posicionamento provável: econômico, médio ou alto padrão?"
+  - "Porte, capital social e natureza jurídica indicam compra recorrente de kits? Capital baixo sozinho não elimina: unidade de rede e SPE costumam abrir com capital pequeno; titular MEI com um ou dois quartos é alvo fraco."
 
 saida_score: 0-100
 canal_preferido: [email, ligacao, whatsapp_assistido]

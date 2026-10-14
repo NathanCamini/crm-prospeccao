@@ -110,14 +110,17 @@ def test_limpeza_mantem_os_meses_mais_recentes(tmp_path) -> None:
     assert sorted(p.name for p in cfg.bronze_dir.iterdir()) == ["2026-08", "2026-09"]
 
 
-def test_carga_com_limpeza_automatica(tmp_path) -> None:
+def test_carga_apaga_zips_e_silver_e_deixa_so_a_gold(tmp_path) -> None:
     from dataclasses import replace
 
-    cfg = replace(_cfg(tmp_path), meses_mantidos=1)
+    cfg = replace(_cfg(tmp_path), manter_arquivos_carga=False)
     gerar_amostra(cfg.bronze_dir, "2026-08", REFERENCIA - timedelta(days=30))
     executar_carga(cfg, "2026-08", baixar=False, data_referencia=REFERENCIA - timedelta(days=30))
     gerar_amostra(cfg.bronze_dir, MES, REFERENCIA)
     executar_carga(cfg, MES, baixar=False, data_referencia=REFERENCIA)
-    assert [p.name for p in cfg.bronze_dir.iterdir()] == [MES]
-    assert [p.name for p in cfg.silver_dir.iterdir()] == [MES]
-    assert mes_carregado(cfg) == MES
+    assert list(cfg.bronze_dir.iterdir()) == [] and list(cfg.silver_dir.iterdir()) == []
+    assert mes_carregado(cfg) == MES and cfg.gold_db.exists()
+    novas = cfg.data_dir / "exportacoes" / "novas"
+    assert sorted(p.name for p in novas.iterdir()) == [MES, "_ultimo_corte.json"]   # o arquivo de agosto saiu
+
+

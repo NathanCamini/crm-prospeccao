@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import shutil
+from datetime import date
 
 import pytest
 
@@ -50,18 +51,32 @@ def test_csv_tem_as_colunas_e_os_valores_do_contrato_do_crm(ambiente) -> None:
     assert not saida.with_name("classificacao.csv.tmp").exists()
 
 
-def test_mes_sem_arquivo_fica_fora_e_csv_anterior_e_mantido(ambiente) -> None:
+def test_leads_continuam_depois_que_o_arquivo_do_mes_e_apagado(ambiente) -> None:
     cfg, store, classificador = ambiente
     escrever_mes(cfg.novas_dir, [empresa(J, "POUSADA NOVA", "5510801", "Hotéis", 300_000, mes_referencia_base="2026-10")],
                  mes="2026-10")
     classificador.executar("2026-10", "teste_hotel", modo="online")
     saida = cfg.saida_dir / "classificacao.csv"
-    shutil.rmtree(cfg.novas_dir / MES)
+    shutil.rmtree(cfg.novas_dir / MES)  # o módulo 1 guarda só o mês atual
 
     resumo = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida)
-    assert [l["cnpj"] for l in _ler(saida)] == [J] and resumo.puladas == {MES: len(NO_FUNIL)}
+    linhas = {l["cnpj"]: l for l in _ler(saida)}
+    assert set(linhas) == NO_FUNIL | {J} and resumo.puladas == {} and resumo.meses == [MES, "2026-10"]
+    assert (linhas[E]["email"], linhas[E]["telefone_1"], linhas[E]["cnae_descricao"]) == \
+        ("reservas.floripa@accor.com", "33334444", "Hotéis")             # cadastro guardado no banco do agente
 
     anterior = saida.read_bytes()
     with pytest.raises(ValueError, match="CSV anterior foi mantido"):
-        exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, mes=MES)
+        exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, mes="2025-01")
     assert saida.read_bytes() == anterior
+
+
+def test_janela_de_leads_tira_as_empresas_antigas(ambiente) -> None:
+    cfg, store, classificador = ambiente
+    escrever_mes(cfg.novas_dir, [empresa(J, "POUSADA NOVA", "5510801", "Hotéis", 300_000,
+                                         data_inicio_atividade=date(2026, 12, 20), mes_referencia_base="2027-01")],
+                 mes="2027-01")
+    classificador.executar("2027-01", "teste_hotel", modo="online")
+    saida = cfg.saida_dir / "classificacao.csv"
+    resumo = exportar_crm(store, cfg.novas_dir, cfg.schema_dir, saida, janela_dias=90, hoje=date(2027, 1, 15))
+    assert [l["cnpj"] for l in _ler(saida)] == [J] and resumo.fora_da_janela == len(NO_FUNIL)  # as de 01/09 saíram

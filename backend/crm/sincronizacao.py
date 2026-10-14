@@ -57,9 +57,25 @@ def colunas_do_lead(lead: dict) -> dict:
     }
 
 
+def classificacoes(lead: dict) -> list[dict]:
+    """Todas as classificações do lead, uma por perfil (contrato v1: `classificacoes`, ou só `classificacao`)."""
+    todas = lead.get("classificacoes") or ([lead["classificacao"]] if lead.get("classificacao") else [])
+    return [c for c in todas if c.get("perfil_id")]
+
+
+def _gravar_perfis(conn, chave: str, lead: dict) -> None:
+    conn.execute("DELETE FROM lead_perfil WHERE chave = ?", (chave,))
+    conn.executemany(
+        "INSERT OR REPLACE INTO lead_perfil (chave, perfil_id, score, e_alvo, classificacao) VALUES (?, ?, ?, ?, ?)",
+        [(chave, c["perfil_id"], c.get("score"), 1 if c.get("e_alvo", True) else 0, json.dumps(c, ensure_ascii=False))
+         for c in classificacoes(lead)])
+
+
 def gravar_do_modulo3(conn, lead: dict, fonte: str | None) -> str:
     """Insere ou atualiza um lead vindo do módulo 3. Devolve 'novo', 'atualizado' ou 'igual'."""
     col = colunas_do_lead(lead)
+    if any(c.get("e_alvo", True) for c in classificacoes(lead)):
+        col["e_alvo"] = 1  # alvo de algum perfil; cada empresa confere o dos perfis dela em lead_perfil
     atual = conn.execute("SELECT dados, ausente_desde FROM lead WHERE chave = ?", (lead["cnpj"],)).fetchone()
     if atual is None:
         conn.execute(
@@ -69,6 +85,7 @@ def gravar_do_modulo3(conn, lead: dict, fonte: str | None) -> str:
                        :data_abertura, :busca, :dados, :fonte, :mes_referencia, :agora, :agora, 'modulo3')""",
             col | {"chave": lead["cnpj"], "fonte": fonte, "agora": agora()},
         )
+        _gravar_perfis(conn, lead["cnpj"], lead)
         return "novo"
     if atual["dados"] == col["dados"] and atual["ausente_desde"] is None:
         conn.execute("UPDATE lead SET sincronizado_em = ?, fonte = ? WHERE chave = ?", (agora(), fonte, lead["cnpj"]))
@@ -81,6 +98,7 @@ def gravar_do_modulo3(conn, lead: dict, fonte: str | None) -> str:
            WHERE chave = :chave""",
         col | {"chave": lead["cnpj"], "fonte": fonte, "agora": agora()},
     )
+    _gravar_perfis(conn, lead["cnpj"], lead)
     return "atualizado"
 
 
@@ -132,6 +150,28 @@ def sincronizar(cfg: Config, m3: Modulo3) -> dict:
         raise
     finally:
         conn.close()
+
+
+_SINCRONIZANDO = threading.Lock()
+
+
+def sincronizar_em_segundo_plano(cfg: Config, m3: Modulo3) -> bool:
+    """Copia agora, numa thread, sem segurar a requisição. Se já houver uma cópia rodando, não começa outra."""
+    if not _SINCRONIZANDO.acquire(blocking=False):
+        return False
+
+    def rodar() -> None:
+        try:
+            sincronizar(cfg, m3)
+        except HTTPException as erro:
+            log.warning("Sincronização com o módulo 3 falhou: %s", erro.detail)
+        except Exception:  # noqa: BLE001 — a thread não pode derrubar nada
+            log.exception("Erro inesperado na sincronização")
+        finally:
+            _SINCRONIZANDO.release()
+
+    threading.Thread(target=rodar, name="sincronizacao-produto", daemon=True).start()
+    return True
 
 
 def sincronizar_periodicamente(cfg: Config, m3: Modulo3, parar: threading.Event) -> None:

@@ -13,6 +13,8 @@ import type {
   PaginaLeads,
   Perfil,
   Pessoa,
+  Produto,
+  PropostaProduto,
   RegistroAuditoria,
   Relatorio,
   Resumo,
@@ -146,6 +148,13 @@ export const api = {
     ),
   suprimir: (cnpj: string, motivo: string) =>
     req<{ suprimidos: number }>("POST", `/api/leads/${enc(cnpj)}/suprimir`, { motivo }),
+
+  produtos: () => req<{ itens: Produto[]; aviso: string | null; pode_editar: boolean; sincronizando: boolean }>("GET", "/api/produtos"),
+  sugerirProduto: (descricao: string, perfil_id?: string) =>
+    req<PropostaProduto>("POST", "/api/produtos/sugerir", { descricao, perfil_id }),
+  salvarProduto: (descricao: string, perfil: PropostaProduto["perfil"], perfil_id?: string) =>
+    req<{ id: string }>("POST", "/api/produtos", { descricao, perfil, perfil_id }),
+  removerProduto: (id: string) => req("DELETE", `/api/produtos/${enc(id)}`),
 
   perguntar: (pergunta: string, chave?: string) =>
     req<{ resposta: string; fonte: "simulado" | "modulo2" }>("POST", "/api/agente/perguntar", { pergunta, chave }),

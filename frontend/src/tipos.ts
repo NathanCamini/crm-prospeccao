@@ -177,6 +177,54 @@ export interface Perfil {
   total_alvos: number;
 }
 
+/** O que a empresa cliente vende: o agente transforma a descrição num filtro de leads. */
+export interface FiltroProduto {
+  cnaes?: string[];
+  cnae_prefixos?: string[];
+  incluir_cnaes_secundarios?: boolean;
+  ufs?: string[];
+  municipios?: string[];
+}
+
+export interface ExecucaoProduto {
+  situacao: "na_fila" | "classificando" | "pronto" | "erro" | "aguardando_mes";
+  mes?: string;
+  inicio?: string;
+  fim?: string;
+  alvos?: number;
+  gravados?: number;
+  erro?: string | null;
+}
+
+export interface Produto {
+  id: string;
+  nome: string;
+  descricao: string;
+  versao: number;
+  criado_por: string;
+  criado_em: string;
+  atualizado_em: string;
+  filtro: FiltroProduto | null;
+  atividades?: { codigo: string; descricao: string; grupo?: boolean }[] | null;
+  criterios: string[] | null;
+  execucao: ExecucaoProduto | null;
+  alvos: number | null;
+}
+
+export interface PropostaProduto {
+  perfil: { nome?: string; produto: string; filtro_sql: FiltroProduto; criterios_llm: string[]; [k: string]: unknown };
+  explicacao: string;
+  atividades: { codigo: string; descricao: string; grupo?: boolean }[];
+  previa: {
+    mes: string | null;
+    total: number | null;
+    limite: number;
+    cabe: boolean;
+    aviso?: string | null;
+    exemplos: { nome: string; municipio: string | null; uf: string | null; atividade: string | null; data_inicio_atividade: string | null }[];
+  };
+}
+
 export interface Modelo {
   id: number;
   nome: string;
@@ -332,6 +380,7 @@ export interface EmpresaCliente {
   clientes: number;
   contatos_7d: number;
   ultima_atividade: string | null;
+  produtos: string | null;
 }
 
 export interface Filtro {

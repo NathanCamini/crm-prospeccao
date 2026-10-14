@@ -27,9 +27,12 @@ class Config:
     apagar_csv_extraido: bool = True
     duckdb_max_temp: str = "20GB"
     espaco_minimo_gb: float = 0.0
-    meses_mantidos: int = 0  # 0 = não apaga meses antigos de bronze/silver
+    manter_arquivos_carga: bool = False  # False = zips e silver apagados depois de cada carga bem-sucedida
     trabalho_dir_env: Path | None = None  # pasta de arquivos temporários (padrão: data/tmp)
     bronze_processos: int = 0  # 0 = automático (núcleos disponíveis, até 8)
+    exportar_novas: bool = True  # ao fim da carga, grava o arquivo do mês para o agente (módulo 2)
+    novas_folga_dias: int = 15  # empresas novas: desde o corte da carga anterior menos esta folga
+    novas_primeira_janela_dias: int = 60  # primeira carga (sem corte anterior): aberturas destes últimos dias
     sessao_horas: float = 12.0  # 0 = pede senha a cada recarga da página
     # Busca complementar de contatos
     cache_busca_dias: int = 90
@@ -92,9 +95,12 @@ def carregar_config(data_dir: Path | None = None) -> Config:
         apagar_csv_extraido=_bool(os.getenv("APAGAR_CSV_EXTRAIDO"), True),
         duckdb_max_temp=os.getenv("DUCKDB_MAX_TEMP", Config.duckdb_max_temp),
         espaco_minimo_gb=float(os.getenv("ESPACO_MINIMO_GB", "50")),
-        meses_mantidos=int(os.getenv("MESES_MANTIDOS", "2")),
+        manter_arquivos_carga=_bool(os.getenv("MANTER_ARQUIVOS_CARGA"), False),
+        novas_folga_dias=int(os.getenv("NOVAS_FOLGA_DIAS", "15")),
+        novas_primeira_janela_dias=int(os.getenv("NOVAS_PRIMEIRA_JANELA_DIAS", "60")),
         trabalho_dir_env=Path(os.environ["PROSPECCAO_TRABALHO_DIR"]).resolve() if os.getenv("PROSPECCAO_TRABALHO_DIR") else None,
         bronze_processos=int(os.getenv("BRONZE_PROCESSOS", "0")),
+        exportar_novas=_bool(os.getenv("EXPORTAR_NOVAS"), True),
         sessao_horas=float(os.getenv("SESSAO_HORAS", "12")),
         cache_busca_dias=int(os.getenv("CACHE_BUSCA_DIAS", "90")),
         site_intervalo_segundos=float(os.getenv("SITE_INTERVALO_SEGUNDOS", "2")),

@@ -1,22 +1,43 @@
-# CRM de prospecção (módulo 4) + módulo 3 simulado.
+# Prospecção de ponta a ponta, num só compose. Cada serviço só fala com o vizinho:
+#   etl (1) -> agente (2) -> modulo3 (3) -> crm-api + web (4)
 #
-#   docker compose up -d --build
+#   docker compose up -d --build                                   # CRM + módulo 3 (dados simulados sem MODULO2_CSV)
 #   docker compose run --rm crm-api python -m crm superadmin criar seu-nome
 #   abra http://localhost:8080
 #
-# Cadeia: web (4) -> crm-api (4) -> modulo3 (3) -> agente (2). Nenhum serviço pula um elo.
+# Rotina do mês, sem intervenção (precisa de GEMINI_API_KEY e MODULO2_CSV no .env):
+#   docker compose --profile agendador up -d
+#     etl-agendador:    carrega cada mês novo da Receita e grava o arquivo do mês para o agente
+#     agente-rotina:    classifica o mês novo em todos os perfis e grava o CSV do módulo 3
+#   O módulo 3 relê o CSV e busca os contatos; o CRM copia os leads a cada 30 min.
+#
+# Perfis opcionais: https (Caddy com certificado automático),
+# etl (terminal do módulo 1: docker compose run --rm etl carga), testes.
 
 services:
   modulo3:
-    build: ./modulo3_stub
+    build:
+      context: ./modulo3
+      additional_contexts:
+        etl: ./etl                              # serviço de contatos do módulo 1 (prospeccao.enrich)
     image: prospeccao-modulo3:latest
     restart: unless-stopped
     environment:
-      MODULO2_CSV: ${MODULO2_CSV:-}               # ex.: /modulo2/classificacao.csv (vazio = dados simulados)
-      AGENTE_URL: ${AGENTE_URL:-}                 # ex.: http://host.docker.internal:9000/perguntar
+      MODULO2_CSV: ${MODULO2_CSV-/modulo2/classificacao.csv}   # CSV que o agente grava; vazio no .env = dados simulados
+      AGENTE_API: ${AGENTE_API:-http://agente-api:9000}         # perguntas e produtos das empresas clientes
       AGENTE_TIMEOUT_SEGUNDOS: ${AGENTE_TIMEOUT_SEGUNDOS:-120}
+      # Busca de contatos das empresas-alvo (só com MODULO2_CSV)
+      MODULO3_ENRIQUECER: ${MODULO3_ENRIQUECER:-true}
+      MODULO3_ENRIQUECER_MINUTOS: ${MODULO3_ENRIQUECER_MINUTOS:-60}
+      MODULO3_LOTE: ${MODULO3_LOTE:-100}
+      CACHE_BUSCA_DIAS: ${CACHE_BUSCA_DIAS:-90}
+      SITE_INTERVALO_SEGUNDOS: ${SITE_INTERVALO_SEGUNDOS:-2}
+      BUSCA_API_PROVEDOR: ${BUSCA_API_PROVEDOR:-nenhum}
+      BRAVE_SEARCH_CHAVE: ${BRAVE_SEARCH_CHAVE:-}
+      API_LIMITE_DIARIO: ${API_LIMITE_DIARIO:-100}
     volumes:
       - ${MODULO2_PASTA:-./modulo2_saida}:/modulo2:ro
+      - modulo3_dados:/dados                      # contatos encontrados e registro das buscas (modulo3.sqlite)
     extra_hosts:
       - "host.docker.internal:host-gateway"     # permite chegar ao agente rodando no seu computador
 
@@ -47,18 +68,55 @@ services:
     depends_on:
       crm-api:
         condition: service_healthy
+    environment:
+      CRM_IP_CADDY: ${CRM_REDE_BORDA:-172.31.247}.2   # só dele o nginx aceita o IP do cliente (X-Forwarded-For)
     ports:
       - "${CRM_ENDERECO:-127.0.0.1}:${CRM_PORTA:-8080}:8080"
+    networks:
+      default:
+      borda:
+        ipv4_address: ${CRM_REDE_BORDA:-172.31.247}.3
 
-  # Agente classificador (módulo 2). Roda sob demanda, não fica no ar:
+  # Módulo 1 (ETL): base da Receita em ${MODULO1_DADOS:-./etl/data}. Terminal:
+  #   docker compose run --rm etl carga        (ou: amostra, exportar-novas, meses, usuario criar NOME)
+  etl:
+    profiles: ["etl"]
+    build: ./etl
+    image: prospeccao:latest
+    user: "${UID:-1000}:${GID:-1000}"
+    env_file:
+      - path: ./etl/.env
+        required: false
+    environment: &etl_ambiente
+      PROSPECCAO_DATA_DIR: /app/data
+      PROSPECCAO_TRABALHO_DIR: /app/trabalho        # ~25 GB de CSV temporário num volume interno, mais rápido
+    volumes: &etl_volumes
+      - ${MODULO1_DADOS:-./etl/data}:/app/data
+      - etl_trabalho:/app/trabalho
+    command: ["--help"]
+
+  etl-agendador:
+    profiles: ["agendador"]
+    image: prospeccao:latest
+    build: ./etl
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    env_file:
+      - path: ./etl/.env
+        required: false
+    environment: *etl_ambiente
+    volumes: *etl_volumes
+    command: ["agendador"]
+
+  # Agente classificador (módulo 2). Sob demanda:
   #   docker compose run --rm agente classificar --mes 2026-10 --perfil amenities_hotel
-  #   docker compose run --rm agente exportar-crm && docker compose restart modulo3
+  #   docker compose run --rm agente exportar-crm      (o módulo 3 relê o CSV sozinho)
   agente:
     profiles: ["agente"]
     build: ./agente
     image: prospeccao-agente:latest
     user: "${UID:-1000}:${GID:-1000}"
-    environment:
+    environment: &agente_ambiente
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       AGENTE_MODELO_TRIAGEM: ${AGENTE_MODELO_TRIAGEM:-gemini-2.5-flash-lite}
       AGENTE_MODELO_REVISAO: ${AGENTE_MODELO_REVISAO:-gemini-3.8-flash}
@@ -66,11 +124,68 @@ services:
       AGENTE_GOLD_DB: /modulo1/gold/empresas.duckdb   # sinal de sócio holding; sem o arquivo, segue sem ele
       AGENTE_DADOS_DIR: /dados
       AGENTE_SAIDA_DIR: /saida
-    volumes:
+      AGENTE_JANELA_LEADS_DIAS: ${AGENTE_JANELA_LEADS_DIAS:-180}   # leads no CRM: abertas há no máximo N dias
+    volumes: &agente_volumes
       - ${MODULO1_DADOS:-./etl/data}:/modulo1:ro         # pasta data/ do módulo 1
       - ./agente/perfis:/app/perfis:ro                  # editar um perfil não exige rebuild
       - ./agente/dados:/dados
       - ${MODULO2_PASTA:-./modulo2_saida}:/saida         # a mesma pasta que o modulo3 lê
+
+  # Rotina do mês: a cada AGENTE_ROTINA_HORAS, classifica o mês mais novo do módulo 1 em todos os
+  # perfis (lote retomável) e, quando tudo termina, grava o CSV do módulo 3.
+  agente-rotina:
+    profiles: ["agendador"]
+    image: prospeccao-agente:latest
+    build: ./agente
+    restart: on-failure:3                             # sem GEMINI_API_KEY, para depois de 3 tentativas
+    user: "${UID:-1000}:${GID:-1000}"
+    environment: *agente_ambiente
+    volumes: *agente_volumes
+    command: ["rotina", "--repetir-horas", "${AGENTE_ROTINA_HORAS:-6}"]
+
+  # HTTPS com certificado automático (Let's Encrypt). Precisa de um domínio apontando para esta
+  # máquina e das portas 80 e 443 abertas. No .env: CRM_DOMINIO=crm.suaempresa.com.br e CRM_COOKIE_SECURE=true.
+  #   docker compose --profile https up -d
+  https:
+    profiles: ["https"]
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      CRM_DOMINIO: ${CRM_DOMINIO:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_dados:/data
+      - caddy_config:/config
+    networks:
+      borda:
+        ipv4_address: ${CRM_REDE_BORDA:-172.31.247}.2
+
+  # API do agente (módulo 2): monta o perfil de leads a partir do produto que cada empresa cliente descreve,
+  # classifica na hora e responde às perguntas do CRM. Só o módulo 3 fala com ela; a porta não é publicada.
+  # Precisa de GEMINI_API_KEY; sem a chave, sobe e explica o motivo em cada chamada.
+  agente-api:
+    image: prospeccao-agente:latest
+    build: ./agente
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["servir", "--porta", "9000"]
+    environment:
+      <<: *agente_ambiente
+      AGENTE_MODELO_PERGUNTAS: ${AGENTE_MODELO_PERGUNTAS:-gemini-2.5-flash}
+      AGENTE_LIMITE_PERFIL_CLIENTE: ${AGENTE_LIMITE_PERFIL_CLIENTE:-1500}
+    volumes: *agente_volumes
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/saude', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
 
   testes:
     profiles: ["testes"]
@@ -78,8 +193,32 @@ services:
     build: ./backend
     command: ["python", "-m", "pytest", "-q"]
 
+  testes-modulo3:
+    profiles: ["testes"]
+    image: prospeccao-modulo3:latest
+    build:
+      context: ./modulo3
+      additional_contexts:
+        etl: ./etl
+    entrypoint: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
   testes-agente:
     profiles: ["testes"]
     image: prospeccao-agente:latest
     build: ./agente
     entrypoint: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+volumes:
+  modulo3_dados:
+  etl_trabalho:
+  caddy_dados:
+  caddy_config:
+
+networks:
+  # Entre o Caddy (https) e o nginx (web), com endereços fixos: o nginx confia no X-Forwarded-For só vindo do
+  # Caddy (.2). Quem acessa direto a porta 8080 chega pelo gateway (.1) e fica com o IP da conexão.
+  # Se a faixa colidir com outra rede sua, troque CRM_REDE_BORDA no .env (os três primeiros números).
+  borda:
+    ipam:
+      config:
+        - subnet: ${CRM_REDE_BORDA:-172.31.247}.0/29

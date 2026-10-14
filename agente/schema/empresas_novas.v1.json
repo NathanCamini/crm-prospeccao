@@ -1,7 +1,7 @@
 {
   "contrato": "empresas_novas",
   "versao": 1,
-  "descricao": "Estabelecimentos que apareceram pela primeira vez na carga do mês (presentes na silver do mês e ausentes na do mês anterior). Produzido pelo Módulo 1 (prospeccao exportar-novas) e consumido pelo agente classificador (Módulo 2). Mudou coluna, tipo ou significado: sobe a versão (v2); o agente recusa versão que não conhece.",
+  "descricao": "Estabelecimentos abertos depois do corte da carga anterior (com folga para cadastros atrasados; na primeira carga, os últimos dias configurados). Produzido pelo Módulo 1 (prospeccao exportar-novas) e consumido pelo agente classificador (Módulo 2). Só o arquivo do mês atual é mantido. Mudou coluna, tipo ou significado: sobe a versão (v2); o agente recusa versão que não conhece.",
   "arquivos": {
     "dados": "data/exportacoes/novas/AAAA-MM/empresas_novas.parquet",
     "manifesto": "data/exportacoes/novas/AAAA-MM/_manifest.json"
@@ -20,37 +20,197 @@
     "VARCHAR[]": "lista de textos"
   },
   "colunas": [
-    {"nome": "cnpj", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "CNPJ completo, 14 caracteres (pode ser alfanumérico desde 07/2026)"},
-    {"nome": "cnpj_basico", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "8 primeiros caracteres do CNPJ; liga matriz, filiais e sócios"},
-    {"nome": "razao_social", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "nome empresarial; em MEI e empresário individual traz o nome do titular (dado pessoal)"},
-    {"nome": "nome_fantasia", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "nome fantasia do estabelecimento; nulo quando ausente"},
-    {"nome": "matriz_filial", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "MATRIZ ou FILIAL"},
-    {"nome": "situacao_cadastral", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "ATIVA, SUSPENSA, INAPTA, BAIXADA ou NULA"},
-    {"nome": "data_inicio_atividade", "tipo": "DATE", "obrigatoria": true, "descricao": "data de abertura"},
-    {"nome": "cnae_principal", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "código CNAE de 7 dígitos, sem pontuação"},
-    {"nome": "cnae_principal_descricao", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "descrição oficial do CNAE principal"},
-    {"nome": "cnaes_secundarios", "tipo": "VARCHAR[]", "obrigatoria": true, "descricao": "códigos CNAE secundários"},
-    {"nome": "natureza_juridica", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "descrição da natureza jurídica (ex.: Sociedade Empresária Limitada)"},
-    {"nome": "porte", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "MEI, ME, EPP, DEMAIS ou NÃO INFORMADO"},
-    {"nome": "capital_social", "tipo": "NUMERIC", "obrigatoria": true, "descricao": "capital social declarado, em reais"},
-    {"nome": "opcao_simples", "tipo": "BOOLEAN", "obrigatoria": true, "descricao": "optante pelo Simples Nacional"},
-    {"nome": "opcao_mei", "tipo": "BOOLEAN", "obrigatoria": true, "descricao": "optante pelo MEI"},
-    {"nome": "tipo_logradouro", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: tipo de logradouro"},
-    {"nome": "logradouro", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: logradouro"},
-    {"nome": "numero", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: número"},
-    {"nome": "complemento", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: complemento"},
-    {"nome": "bairro", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: bairro"},
-    {"nome": "cep", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "endereço: CEP, 8 dígitos"},
-    {"nome": "uf", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "sigla da UF; EX para exterior"},
-    {"nome": "municipio", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "nome do município, maiúsculas sem acento"},
-    {"nome": "ddd_receita_1", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "contato da Receita, sem alteração"},
-    {"nome": "telefone_receita_1", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "contato da Receita, sem alteração"},
-    {"nome": "ddd_receita_2", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "contato da Receita, sem alteração"},
-    {"nome": "telefone_receita_2", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "contato da Receita, sem alteração"},
-    {"nome": "email_receita", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "contato da Receita, sem alteração"},
-    {"nome": "mes_referencia_base", "tipo": "VARCHAR", "obrigatoria": true, "descricao": "AAAA-MM da carga"},
-    {"nome": "contato_compartilhado", "tipo": "BOOLEAN", "obrigatoria": false, "descricao": "marcação da gold: o mesmo e-mail ou telefone da Receita aparece em mais de N CNPJs (escritório de contabilidade)"},
-    {"nome": "filial_de_empresa_existente", "tipo": "BOOLEAN", "obrigatoria": false, "descricao": "marcação da gold: FILIAL cujo cnpj_basico já existia em meses anteriores"},
-    {"nome": "pessoa_fisica_identificavel", "tipo": "BOOLEAN", "obrigatoria": false, "descricao": "marcação da gold: empresário individual ou MEI; a razão social traz nome (e às vezes CPF) do titular"}
+    {
+      "nome": "cnpj",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "CNPJ completo, 14 caracteres (pode ser alfanumérico desde 07/2026)"
+    },
+    {
+      "nome": "cnpj_basico",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "8 primeiros caracteres do CNPJ; liga matriz, filiais e sócios"
+    },
+    {
+      "nome": "razao_social",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "nome empresarial; em MEI e empresário individual traz o nome do titular (dado pessoal)"
+    },
+    {
+      "nome": "nome_fantasia",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "nome fantasia do estabelecimento; nulo quando ausente"
+    },
+    {
+      "nome": "matriz_filial",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "MATRIZ ou FILIAL"
+    },
+    {
+      "nome": "situacao_cadastral",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "ATIVA, SUSPENSA, INAPTA, BAIXADA ou NULA"
+    },
+    {
+      "nome": "data_inicio_atividade",
+      "tipo": "DATE",
+      "obrigatoria": true,
+      "descricao": "data de abertura"
+    },
+    {
+      "nome": "cnae_principal",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "código CNAE de 7 dígitos, sem pontuação"
+    },
+    {
+      "nome": "cnae_principal_descricao",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "descrição oficial do CNAE principal"
+    },
+    {
+      "nome": "cnaes_secundarios",
+      "tipo": "VARCHAR[]",
+      "obrigatoria": true,
+      "descricao": "códigos CNAE secundários"
+    },
+    {
+      "nome": "natureza_juridica",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "descrição da natureza jurídica (ex.: Sociedade Empresária Limitada)"
+    },
+    {
+      "nome": "porte",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "MEI, ME, EPP, DEMAIS ou NÃO INFORMADO"
+    },
+    {
+      "nome": "capital_social",
+      "tipo": "NUMERIC",
+      "obrigatoria": true,
+      "descricao": "capital social declarado, em reais"
+    },
+    {
+      "nome": "opcao_simples",
+      "tipo": "BOOLEAN",
+      "obrigatoria": true,
+      "descricao": "optante pelo Simples Nacional"
+    },
+    {
+      "nome": "opcao_mei",
+      "tipo": "BOOLEAN",
+      "obrigatoria": true,
+      "descricao": "optante pelo MEI"
+    },
+    {
+      "nome": "tipo_logradouro",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: tipo de logradouro"
+    },
+    {
+      "nome": "logradouro",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: logradouro"
+    },
+    {
+      "nome": "numero",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: número"
+    },
+    {
+      "nome": "complemento",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: complemento"
+    },
+    {
+      "nome": "bairro",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: bairro"
+    },
+    {
+      "nome": "cep",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "endereço: CEP, 8 dígitos"
+    },
+    {
+      "nome": "uf",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "sigla da UF; EX para exterior"
+    },
+    {
+      "nome": "municipio",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "nome do município, maiúsculas sem acento"
+    },
+    {
+      "nome": "ddd_receita_1",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "contato da Receita, sem alteração"
+    },
+    {
+      "nome": "telefone_receita_1",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "contato da Receita, sem alteração"
+    },
+    {
+      "nome": "ddd_receita_2",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "contato da Receita, sem alteração"
+    },
+    {
+      "nome": "telefone_receita_2",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "contato da Receita, sem alteração"
+    },
+    {
+      "nome": "email_receita",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "contato da Receita, sem alteração"
+    },
+    {
+      "nome": "mes_referencia_base",
+      "tipo": "VARCHAR",
+      "obrigatoria": true,
+      "descricao": "AAAA-MM da carga"
+    },
+    {
+      "nome": "contato_compartilhado",
+      "tipo": "BOOLEAN",
+      "obrigatoria": false,
+      "descricao": "marcação da gold: o mesmo e-mail ou telefone da Receita aparece em mais de N CNPJs (escritório de contabilidade)"
+    },
+    {
+      "nome": "filial_de_empresa_existente",
+      "tipo": "BOOLEAN",
+      "obrigatoria": false,
+      "descricao": "marcação da gold: FILIAL cujo cnpj_basico já existia em meses anteriores"
+    },
+    {
+      "nome": "pessoa_fisica_identificavel",
+      "tipo": "BOOLEAN",
+      "obrigatoria": false,
+      "descricao": "marcação da gold: empresário individual ou MEI; a razão social traz nome (e às vezes CPF) do titular"
+    }
   ]
 }

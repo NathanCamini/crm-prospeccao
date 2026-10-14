@@ -34,7 +34,7 @@ def perfis(m3: Modulo3 = Depends(modulo3), conn: sqlite3.Connection = Depends(db
         # módulo 3 fora do ar: os perfis que já existem na cópia local
         todos = [{"id": r[0], "nome": r[0], "produto": None, "total_alvos": r[1]} for r in conn.execute(
             "SELECT perfil_id, SUM(e_alvo) FROM lead WHERE origem = 'modulo3' AND perfil_id IS NOT NULL GROUP BY perfil_id")]
-    return [p for p in todos if not ctx.perfis or p["id"] in ctx.perfis]
+    return [p for p in todos if ctx.ve_perfil(p["id"])]
 
 
 # ------------------------------------------------------------------ agente (via módulo 3)
@@ -60,11 +60,9 @@ def perguntar(
         linha = carregar_lead(conn, ctx, dados.chave, cfg, m3)
         exigir_acesso(conn, ctx, linha["chave"])
         chave = linha["chave"]
-        if linha["origem"] == "modulo3":
-            cnpj = chave
-        else:
-            contexto_lead = dados_do_lead(linha)
-    resposta = m3.perguntar(dados.pergunta.strip(), cnpj, contexto_lead)
+        cnpj = chave if linha["origem"] == "modulo3" else None
+        contexto_lead = dados_do_lead(linha)  # como a empresa vê: com a classificação do produto dela
+    resposta = m3.perguntar(dados.pergunta.strip(), cnpj, contexto_lead, ctx.perfis or None)
     if chave:
         atividade(conn, ctx, chave, "agente", resposta.get("resposta", "")[:8000], assunto=dados.pergunta.strip()[:300])
     anotar(request, "acesso", "agente.perguntar", entidade="lead" if chave else None, entidade_id=chave,

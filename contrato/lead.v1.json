@@ -6,7 +6,11 @@
     "GET /v1/perfis": "Perfil[]",
     "POST /v1/leads/busca": "Filtro -> Pagina",
     "GET /v1/leads/{cnpj}": "Lead",
-    "POST /v1/perguntar": "Pergunta -> Resposta"
+    "POST /v1/perguntar": "Pergunta -> Resposta",
+    "GET /v1/produtos?dono=X": "produtos (perfis) descritos pela empresa cliente X; repassado ao agente",
+    "POST /v1/produtos/sugerir": "{dono, descricao, perfil_id?} -> perfil proposto e prévia do último mês",
+    "POST /v1/produtos": "{dono, descricao, perfil, perfil_id?} -> produto gravado; classificação na hora",
+    "DELETE /v1/produtos/{id}?dono=X": "desativa o produto"
   },
   "schemas": {
     "Lead": {
@@ -440,6 +444,14 @@
         },
         "classificacao": {
           "$ref": "#/$defs/Classificacao"
+        },
+        "classificacoes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Classificacao"
+          },
+          "title": "Classificacoes",
+          "type": "array"
         },
         "canal_sugerido": {
           "anyOf": [
@@ -1033,6 +1045,14 @@
             "classificacao": {
               "$ref": "#/$defs/Classificacao"
             },
+            "classificacoes": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Classificacao"
+              },
+              "title": "Classificacoes",
+              "type": "array"
+            },
             "canal_sugerido": {
               "anyOf": [
                 {
@@ -1211,6 +1231,21 @@
           ],
           "default": null,
           "title": "Contexto"
+        },
+        "perfis": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perfis"
         }
       },
       "required": [

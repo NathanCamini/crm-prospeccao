@@ -1,12 +1,12 @@
 # CRM de prospecção (módulo 4)
 
-Interface onde as equipes das empresas clientes trabalham os leads recém-abertos que o agente classificou: veem por que cada um é alvo, contatam por clique (e-mail, WhatsApp, formulário, ligação), mudam o estágio, agendam o próximo passo, registram vendas, cadastram leads que encontraram por conta própria e perguntam ao agente. Tudo o que cada pessoa faz fica na auditoria.
+Interface onde as equipes das empresas clientes trabalham os leads recém-abertos que o agente classificou. Cada empresa conta, em **Produtos**, o que vende e para quem; o agente transforma isso no filtro de leads e, todo mês, traz as empresas novas que podem comprar. A equipe vê por que cada uma é alvo, contatam por clique (e-mail, WhatsApp, formulário, ligação), mudam o estágio, agendam o próximo passo, registram vendas, cadastram leads que encontraram por conta própria e perguntam ao agente. Tudo o que cada pessoa faz fica na auditoria.
 
 O CRM não processa a base. Ele guarda uma cópia dos leads que recebe do módulo 3, mostra e registra o que cada pessoa faz.
 
 ```
 web (React + TS) ──► crm-api (FastAPI) ──► módulo 3 ──► módulo 2 (agente) ──► módulo 1 (ETL)
-                       │                    (aqui simulado)
+                       │                    (contatos)
                        └─ crm.sqlite: cópia dos leads, empresas clientes, pessoas, estágios, histórico,
                                       próximos passos, vendas, modelos, não contatar, auditoria
 ```
@@ -23,7 +23,13 @@ docker compose up -d --build
 docker compose run --rm crm-api python -m crm superadmin criar seu-nome --nome-exibicao "Seu Nome"
 ```
 
-Abra http://localhost:8080 e entre com o superadmin. Em **Clientes**, cadastre a primeira empresa cliente e o administrador dela. O sistema gera uma senha provisória para você repassar; no primeiro acesso a pessoa cria a própria senha e, em **Equipe**, cadastra os funcionários.
+Abra http://localhost:8080 e entre com o superadmin. Em **Clientes**, cadastre a primeira empresa cliente e o administrador dela. O sistema gera uma senha provisória para você repassar. No primeiro acesso, a pessoa:
+
+1. cria a própria senha;
+2. em **Produtos**, descreve o que a empresa vende e para quem (os leads começam a chegar na hora);
+3. em **Equipe**, cadastra os funcionários.
+
+Para os produtos funcionarem, o `.env` precisa da `GEMINI_API_KEY` e da base do módulo 1 (ver "Rotina do mês"). Sem isso, deixe `MODULO2_CSV` vazio para ver o CRM com dados fictícios.
 
 O login fica salvo por 30 dias se "Manter conectado" estiver marcado.
 
@@ -37,17 +43,59 @@ O login fica salvo por 30 dias se "Manter conectado" estiver marcado.
 | `docker compose run --rm crm-api python -m crm auditoria verificar` | conferir se algum registro da auditoria foi alterado ou apagado direto no arquivo |
 | `docker compose --profile testes run --rm testes` | testes da API |
 | `docker compose --profile testes run --rm testes-agente` | testes do agente (módulo 2) |
+| `docker compose --profile testes run --rm testes-modulo3` | testes do módulo 3 |
+| `docker compose logs -f agente-api` | acompanhar o agente (produtos, classificação na hora, perguntas) |
+| `docker compose exec modulo3 python -m modulo3 enriquecer` | buscar agora os contatos das empresas-alvo |
 | `docker compose logs -f crm-api` | acompanhar a API |
 
 Os dados do CRM ficam em `./dados/crm.sqlite`. Em Linux, se aparecer "Permission denied" em `./dados`, rode com `UID=$(id -u) GID=$(id -g) docker compose …`.
+
+### Rotina do mês, sem intervenção
+
+Com `GEMINI_API_KEY` e `MODULO2_CSV=/modulo2/classificacao.csv` no `.env`:
+
+```bash
+docker compose --profile agendador up -d
+```
+
+| Etapa | Serviço | O que faz |
+|---|---|---|
+| 1 | `etl-agendador` | verifica todo dia se a Receita publicou um mês novo; carrega e grava o arquivo do mês para o agente |
+| 2 | `agente-rotina` | a cada `AGENTE_ROTINA_HORAS` (6), classifica o mês mais novo para todos os produtos das empresas clientes, em lote; quando tudo termina, grava o `classificacao.csv` |
+| 3 | `modulo3` | relê o CSV e busca os contatos das empresas-alvo |
+| 4 | `crm-api` | copia os leads a cada 30 minutos |
+
+Cada etapa só lê o que a anterior gravou, então qualquer uma pode parar e retomar depois sem perder nada.
+
+Ficam com a equipe:
+
+- a conferência mensal das classificações (`agente revisao-mensal`);
+- o acompanhamento de custos (`agente custos`).
+
+O terminal do módulo 1 também está aqui: `docker compose --profile etl run --rm etl carga` (ou `amostra`, `exportar-novas`, `usuario criar NOME`). A base fica em `MODULO1_DADOS` (padrão `./etl/data`).
+
+### HTTPS
+
+Para acessar pela internet, aponte um domínio para a máquina, libere as portas 80 e 443 e, no `.env`:
+
+```env
+CRM_DOMINIO=crm.suaempresa.com.br
+CRM_COOKIE_SECURE=true
+```
+
+```bash
+docker compose --profile https up -d
+```
+
+O Caddy emite e renova o certificado sozinho (Let's Encrypt) e repassa ao nginx. A porta 8080 continua só em `127.0.0.1`.
 
 ## Rodar sem Docker (desenvolvimento)
 
 Três terminais, Python 3.11+ e Node 20+:
 
 ```bash
-# 1. módulo 3 simulado
-cd modulo3_stub && pip install -e ".[dev]" && uvicorn modulo3.main:app --port 8100
+# 1. módulo 3 (sem MODULO2_CSV, com os dados simulados)
+cd modulo3 && pip install --no-deps -e ../etl && pip install -e ".[dev]" && uvicorn modulo3.main:app --port 8100
 
 # 2. API do CRM
 cd backend && pip install -e ".[dev]"
@@ -69,6 +117,7 @@ O sistema atende várias empresas clientes. Cada uma tem a própria equipe, os p
 | Leads que vê | todos da empresa em que entrou | todos da empresa | os livres e os seus |
 | Lead de um colega | altera e transfere | altera e transfere | não vê e não altera |
 | Equipe | o mesmo que o administrador, em qualquer empresa | cadastra, muda o papel, cria senha provisória, desativa e remove; vê o que cada um fez | — |
+| Produtos (o que a empresa vende) | acompanha | descreve, edita e remove | — |
 | Modelos de mensagem | edita | edita | só lê |
 | Não contatar | inclui, libera e cria bloqueios que valem para todas as empresas | inclui e libera os da empresa | só inclui |
 | Cadastrar lead | sim | sim | sim (fica responsável por ele) |
@@ -81,13 +130,34 @@ O sistema atende várias empresas clientes. Cada uma tem a própria equipe, os p
 
 **Senhas provisórias.** Toda pessoa cadastrada pela tela recebe uma senha provisória e só consegue trabalhar depois de criar a própria. Desativar uma pessoa ou uma empresa encerra as sessões abertas na hora. Remover alguém deixa os leads dela livres e mantém o histórico com o nome.
 
-**Perfis de lead por empresa.** No cadastro da empresa cliente você escolhe quais perfis do agente ela recebe (por exemplo, só hotelaria). Sem nenhum marcado, ela vê todos.
+**Produtos.** Cada empresa cliente tem os próprios leads porque descreve os próprios produtos (ver "Produtos" abaixo). O lead de um produto só aparece para a empresa que o descreveu. Se o mesmo CNPJ for alvo de produtos de duas empresas, cada uma o vê com a pontuação e a justificativa do próprio produto.
 
 ## Leads: cópia local e cadastro manual
 
 **Cópia local.** A cada 30 minutos (`CRM_SINCRONIZAR_MINUTOS`) o CRM copia os leads do módulo 3 para a base dele. A lista, os filtros, a busca e a exportação trabalham sobre essa cópia, então o CRM continua funcionando se o módulo 3 estiver fora do ar, e um lead que sumiu da carga do mês continua visível para quem já mexeu nele, com o aviso "não veio na última carga". O superadmin vê a última sincronização e pode rodar uma na hora, em **Clientes**.
 
 **Cadastro manual.** Em **Leads → Cadastrar lead**, qualquer pessoa registra uma empresa que achou por conta própria (indicação, feira, porta a porta). Precisa de nome e de pelo menos um contato; CNPJ é opcional, mas se vier é conferido (dígito verificador) e, se o lead já existir, o CRM aponta para ele em vez de duplicar. O lead manual pertence só à empresa cliente que o cadastrou, aparece com o selo "Cadastrado" e pode ser editado depois. Ele segue as mesmas regras de contato, não contatar e histórico dos demais, e as perguntas ao agente sobre ele levam os dados cadastrados.
+
+## Produtos
+
+Em **Produtos**, o administrador da empresa cliente escreve, com as palavras dele, o que vende e para quem. Exemplo: "Vendemos sistema de gestão para academias e estúdios de pilates no RS e em SC".
+
+1. **Prévia.** O agente lê a descrição e a lista oficial de atividades da Receita (CNAE) e monta o filtro:
+   - as atividades das empresas que compram o produto;
+   - a região, se a descrição falar de uma;
+   - as perguntas que vai responder sobre cada empresa (porte, posicionamento, sinais de rede).
+   A tela mostra quantas empresas novas do último mês passariam e alguns exemplos. Nada é gravado ainda; se não ficou bom, a pessoa ajusta o texto e vê de novo.
+2. **Salvar.** O agente classifica na hora as empresas novas do último mês, uma a uma. Quando termina, o CRM copia os leads, sem esperar os 30 minutos.
+3. **Todo mês.** A rotina traz os leads novos de cada produto.
+
+Regras:
+
+- Uma empresa pode ter vários produtos; cada lead mostra de qual veio.
+- Editar o texto cria uma versão nova do produto e reclassifica.
+- Remover para os leads novos; os que a equipe já trabalhou continuam.
+- **Quem descreve** é só o administrador da empresa. O superadmin acompanha a lista, mas não escreve por ela; vendedores não acessam.
+- **Teto de custo.** Um produto aceita no máximo `AGENTE_LIMITE_PERFIL_CLIENTE` (1.500) empresas novas por mês no filtro. Acima disso, a prévia pede uma descrição mais precisa (ramo ou região). Cada empresa avaliada custa cerca de US$ 0,0001.
+- Tudo fica na auditoria: cada prévia, criação, alteração (antes e depois) e remoção.
 
 ## Próximos passos, vendas e relatórios
 
@@ -99,7 +169,7 @@ O sistema atende várias empresas clientes. Cada uma tem a própria equipe, os p
 
 Tudo o que acontece fica registrado: quem, quando, de qual IP e navegador, em qual rota e com qual resultado.
 
-- **Alterações** guardam o antes e o depois de cada campo que mudou: estágio, responsável, dados de um lead manual, modelo de mensagem, papel de uma pessoa, perfis de uma empresa, venda e estorno, não contatar.
+- **Alterações** guardam o antes e o depois de cada campo que mudou: estágio, responsável, dados de um lead manual, produto (descrição), modelo de mensagem, papel de uma pessoa, perfis de uma empresa, venda e estorno, não contatar.
 - **Acessos**: abrir uma ficha, listar, exportar, consultar a própria auditoria.
 - **Segurança**: login certo e errado (com o motivo), saída, troca e redefinição de senha, superadmin entrando numa empresa.
 - **Recusas e negações**: um vendedor tentando abrir a equipe, um contato bloqueado pelo não contatar, uma requisição sem o cabeçalho de proteção. Esses ficam registrados mesmo quando nada foi alterado.
@@ -112,7 +182,7 @@ A tela **Auditoria** filtra por período, pessoa, tipo de ação e resultado, mo
 
 ## Dados simulados
 
-Enquanto o módulo 3 real não existe, `modulo3_stub` faz o papel dele com 44 empresas fictícias de hotelaria e restaurantes no RS e em SC (39 classificadas como alvo), já com classificação, contatos complementares e alguns casos difíceis (unidade de rede, filial, e-mail de contabilidade).
+Sem `MODULO2_CSV`, o módulo 3 serve 44 empresas fictícias de hotelaria e restaurantes no RS e em SC (39 classificadas como alvo), já com classificação, contatos complementares e alguns casos difíceis (unidade de rede, filial, e-mail de contabilidade).
 
 Para não mandar mensagem a ninguém por engano:
 
@@ -123,51 +193,56 @@ Para não mandar mensagem a ninguém por engano:
 
 O agente fica em [`agente/`](agente/README.md). Dá para usar a saída dele antes de existir o módulo 3 real.
 
-**Leads vindos do CSV do agente.** Com o mês classificado, o agente grava `classificacao.csv` em `MODULO2_PASTA` (a mesma pasta que o módulo 3 lê). Defina o arquivo no `.env` e reinicie o módulo 3, que lê o CSV ao subir:
+**Leads vindos do CSV do agente.** O agente grava `classificacao.csv` em `MODULO2_PASTA` (a mesma pasta que o módulo 3 lê) quando termina de classificar um produto e na rotina do mês. O módulo 3 relê o arquivo sozinho (`MODULO2_CSV=/modulo2/classificacao.csv`, o padrão). Também dá para gravar à mão: `docker compose run --rm agente exportar-crm`.
 
-```bash
-docker compose run --rm agente exportar-crm
-docker compose restart modulo3
-```
-
-```env
-MODULO2_CSV=/modulo2/classificacao.csv
-```
-
-O agente grava uma linha por CNPJ × perfil, da versão vigente de cada perfil, com todas as colunas abaixo. Separador `;` ou `,`, UTF-8. Colunas obrigatórias: `cnpj`, `razao_social`, `perfil_id`, `score`. Opcionais: `nome_fantasia`, `uf`, `municipio`, `bairro`, `cnae_principal`, `cnae_descricao`, `porte`, `capital_social`, `data_inicio_atividade` (AAAA-MM-DD), `matriz_filial`, `situacao_cadastral`, `logradouro`, `numero`, `cep`, `ddd_1`, `telefone_1`, `ddd_2`, `telefone_2`, `email`, `e_alvo`, `perfil_versao`, `justificativa`, `e_franquia`, `marca`, `padrao`, `produto_sugerido`, `classificado_em`, `mes_referencia`. Sem `e_alvo`, entra como alvo quem tem score ≥ 60.
+O agente grava uma linha por CNPJ × perfil, da versão vigente de cada perfil ativo, com todas as colunas abaixo. Separador `;` ou `,`, UTF-8. Colunas obrigatórias: `cnpj`, `razao_social`, `perfil_id`, `score`. Opcionais: `nome_fantasia`, `uf`, `municipio`, `bairro`, `cnae_principal`, `cnae_descricao`, `porte`, `capital_social`, `data_inicio_atividade` (AAAA-MM-DD), `matriz_filial`, `situacao_cadastral`, `logradouro`, `numero`, `cep`, `ddd_1`, `telefone_1`, `ddd_2`, `telefone_2`, `email`, `e_alvo`, `perfil_versao`, `justificativa`, `e_franquia`, `marca`, `padrao`, `produto_sugerido`, `classificado_em`, `mes_referencia`, `perfil_nome`. Sem `e_alvo`, entra como alvo quem tem score ≥ 60. O módulo 3 junta as linhas de um CNPJ num lead só, com todas as classificações (`classificacoes`).
 
 Com o CSV real os links passam a abrir de verdade (a fonte deixa de ser "simulado").
 
-**Perguntas ao agente.** Ainda não existe: o agente de `agente/` só classifica, então o CRM segue com a resposta simulada. Para ligar, o agente precisa expor um endpoint HTTP:
+**API do agente (`agente-api`).** Fica sempre no ar e só o módulo 3 fala com ela (`AGENTE_API`). Faz duas coisas:
 
-```
-POST {AGENTE_URL}
-{"pergunta": "texto", "contexto": { ...Lead do contrato v1... } | null}
-→ 200 {"resposta": "texto"}
-```
+- **Produtos:** monta o perfil a partir da descrição, mostra a prévia, grava e classifica na hora.
+- **Perguntas ao agente:** o caminho segue elo a elo, CRM → módulo 3 → agente.
+  - Pergunta feita na ficha de uma empresa: o agente recebe o lead como a empresa o vê, com a classificação do produto dela. A resposta fica no histórico da empresa.
+  - Pergunta geral: o agente recebe o resumo e os principais alvos, só dos produtos da empresa que perguntou.
+  - O agente nunca recebe CNPJ, telefone nem e-mail. Dos contatos encontrados, vai só o tipo e a confiança.
 
-```env
-AGENTE_URL=http://host.docker.internal:9000/perguntar
-```
+Precisa de `GEMINI_API_KEY`. Sem a chave, os produtos explicam o motivo na tela; com dados simulados, as perguntas seguem com resposta simulada.
 
-`contexto` vem preenchido quando a pergunta é feita na ficha de uma empresa. A resposta fica no histórico dela.
+## Módulo 3: contatos complementares
 
-## Trocar o simulado pelo módulo 3 real
+O módulo 3 ([`modulo3/`](modulo3)) fica entre o agente e o CRM. Com `MODULO2_CSV`, ele:
 
-O módulo 3 real precisa responder aos mesmos cinco endpoints, no formato de `contrato/lead.v1.json`:
+1. lê o `classificacao.csv` do agente, e de novo sempre que o arquivo muda;
+2. busca em segundo plano os contatos das empresas-alvo (a cada `MODULO3_ENRIQUECER_MINUTOS`, até `MODULO3_LOTE` empresas por vez);
+3. entrega cada lead ao CRM com os contatos encontrados, cada um com fonte, endereço e confiança.
+
+A busca é a mesma do módulo 1 (`etl/src/prospeccao/enrich`), sem cópia de código:
+
+- lê o site do domínio do e-mail da Receita (não vale para gmail, hotmail e similares), respeitando o robots.txt e um intervalo mínimo por site;
+- link de WhatsApp no site vira contato `whatsapp`;
+- com `BUSCA_API_PROVEDOR=brave`, quem não tem site próprio no e-mail passa pela API, que só indica o site provável. Se a confiança não for baixa, o módulo 3 lê esse site;
+- nunca raspa o Google nem redes sociais;
+- uma empresa já buscada só volta à fila depois de `CACHE_BUSCA_DIAS`;
+- o contato original da Receita nunca é alterado e não é repetido como complementar.
+
+Os contatos ficam no volume `modulo3_dados` (`modulo3.sqlite`). O `GET /saude` mostra quantas empresas já têm contato e o resumo do último ciclo.
 
 | Endpoint | Retorno |
 |---|---|
-| `GET /saude` | `{"fonte": "modulo2" \| "simulado", "mes_referencia", ...}` |
+| `GET /saude` | `{"fonte": "modulo2" \| "simulado", "mes_referencia", "enriquecimento", ...}` |
 | `GET /v1/perfis` | lista de perfis com total de alvos |
 | `POST /v1/leads/busca` | página de leads; aceita `cnpjs`, `excluir_cnpjs` e `apenas_cnpjs` (o CRM usa para filtrar por estágio) |
 | `GET /v1/leads/{cnpj}` | um lead |
-| `POST /v1/perguntar` | repassa ao agente |
-
-Depois é só trocar o serviço `modulo3` no `docker-compose.yml`. O CRM não muda.
+| `POST /v1/perguntar` | repassa ao agente (com os perfis da empresa que pergunta) |
+| `GET /v1/produtos?dono=X` | produtos da empresa cliente X (repassado ao agente) |
+| `POST /v1/produtos/sugerir` | prévia do perfil a partir da descrição |
+| `POST /v1/produtos` | grava o produto; o agente classifica o último mês na hora |
+| `DELETE /v1/produtos/{id}?dono=X` | remove o produto |
 
 ## O que o CRM faz
 
+- **Produtos** (administradores): o que a empresa vende e para quem, com prévia do agente; é daí que vêm os leads.
 - **Leads**: funil com a contagem por estágio (clique filtra), busca, responsável, perfil, origem (agente ou cadastrado), UF, município, pontuação mínima, ordenação (inclusive por próximo passo e última atividade) e exportação CSV. Os filtros ficam na URL, então voltar da ficha mantém a lista.
 - **Ficha**: por que é alvo, contato original da Receita (sem alteração), contatos do módulo 3 com fonte e confiança, dados cadastrais, próximos passos, vendas, histórico.
 - **Contatar**: escolhe canal, destino e modelo; a mensagem chega pronta e editável. O clique abre o WhatsApp, o programa de e-mail ou o formulário do site com o texto, e registra o envio. Empresa em "Novo" passa para "Em contato".
@@ -175,7 +250,7 @@ Depois é só trocar o serviço `modulo3` no `docker-compose.yml`. O CRM não mu
 - **Modelos de mensagem**: variáveis `{nome_fantasia}`, `{municipio}`, `{produto}`, `{vendedor}` e outras. Os modelos iniciais dizem de onde veio o contato e como pedir para sair.
 - **Perguntar ao agente**: conversa geral ou pergunta sobre uma empresa.
 - **Equipe** (administradores): quantos leads cada pessoa tem e em que estágio, contatos dos últimos 7 dias, última atividade e o feed do que a equipe fez, filtrável por pessoa.
-- **Clientes** (superadmin): empresas clientes com pessoas, leads em trabalho, clientes fechados e contatos da semana; botão para entrar em cada uma.
+- **Clientes** (superadmin): empresas clientes com pessoas, produtos, leads em trabalho, clientes fechados e contatos da semana; botão para entrar em cada uma.
 - **Agenda**, **Relatórios** e **Auditoria**: ver acima.
 - **Minha conta**: trocar a senha.
 
@@ -188,16 +263,18 @@ Não há envio automático. Ele entra na fase seguinte, só para e-mail e com ap
 - Toda requisição que altera dados exige o cabeçalho `X-CRM: 1`, que outro site não consegue enviar.
 - Por padrão a porta só escuta em `127.0.0.1`.
 - Contêineres sem root; nginx com cabeçalhos de segurança e CSP.
-- O IP gravado na auditoria é o que o nginx viu; um `X-Forwarded-For` mandado pelo cliente é ignorado. Se puser outro proxy HTTPS na frente, ajuste `proxy_set_header X-Forwarded-For` em `frontend/nginx.conf`.
+- O IP gravado na auditoria é o que o nginx viu; um `X-Forwarded-For` mandado pelo cliente é ignorado.
+- Atrás do Caddy (perfil `https`), o nginx aceita o IP do cliente só vindo do endereço fixo do Caddy na rede `borda`. Quem acessa direto a 8080 continua com o IP da conexão.
+- Se puser outro proxy na frente, troque `set_real_ip_from` em `frontend/nginx.conf` pelo endereço dele.
 
 ## Testes
 
 ```bash
-cd backend && pytest        # 77 testes: login, sessão, papéis, isolamento entre empresas, estágios, contato, supressão, agente,
+cd backend && pytest        # 85 testes: login, sessão, papéis, isolamento entre empresas, produtos, estágios, contato, supressão, agente,
                             # cópia local, lead manual, próximos passos, vendas, relatórios, exportação, auditoria e integridade
-cd modulo3_stub && pytest   # 8 testes: dados fictícios, busca, CSV do agente
-cd etl && pytest            # 182 testes do módulo 1: carga, consultas, contatos, exportação, interface
-cd agente && pytest         # 64 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM
+cd modulo3 && pytest        # 22 testes: dados fictícios, busca, CSV do agente, releitura, busca de contatos, produtos
+cd etl && pytest            # 192 testes do módulo 1: carga, arquivo do mês para o agente, consultas, contatos, exportação, interface
+cd agente && pytest         # 98 testes: contrato, perfil, funil, sinais, lote retomável, regras, avaliação, CSV do CRM, perguntas, rotina, produtos
 cd frontend && npm run build  # checagem de tipos + build
 ```
 
@@ -206,9 +283,10 @@ cd frontend && npm run build  # checagem de tipos + build
 ```
 backend/        API do CRM (FastAPI + SQLite)
 frontend/       interface (React + TypeScript + Vite), servida por nginx
+deploy/         Caddyfile do HTTPS (perfil "https")
 etl/            módulo 1: carga dos Dados Abertos do CNPJ (DuckDB), interface Streamlit e agente do Colab — ver etl/README.md
-modulo3_stub/   módulo 3 simulado (FastAPI)
-agente/         módulo 2: agente classificador (perfis, contrato do mês, Gemini) — ver agente/README.md
+modulo3/        módulo 3: contatos complementares e entrega ao CRM (FastAPI); dados simulados sem o CSV
+agente/         módulo 2: agente classificador (perfis dos produtos, contrato do mês, Gemini, API) — ver agente/README.md
 contrato/       contrato v1 entre módulo 3 e CRM (JSON Schema)
 dados/          banco do CRM (montado no contêiner)
 modulo2_saida/  CSV que o agente grava e o módulo 3 lê
@@ -240,3 +318,10 @@ modulo2_saida/  CSV que o agente grava e o módulo 3 lê
 | D54 | A auditoria é gravada por um middleware, depois da resposta, em transação separada. | Toda requisição gera registro, inclusive as negadas e as que dão erro, e uma falha na auditoria não perde a ação do usuário (o erro vai para o log do servidor). |
 | D55 | Cliques que não passam pelo servidor são enviados de uma lista fechada de eventos. | Registra "copiou a mensagem" ou "abriu o WhatsApp" sem deixar a tela gravar qualquer texto na auditoria. |
 | D56 | Datas de agenda e relatórios no fuso `America/Sao_Paulo` (`CRM_FUSO`); horários gravados em UTC. | "Hoje" e "semana" precisam bater com o relógio da equipe; UTC no banco evita ambiguidade. |
+| D66 | O módulo 3 real nasce do simulado e usa o serviço de contatos do módulo 1 (`prospeccao.enrich`), com banco próprio. | A busca de contatos já existia, testada, no módulo 1; o módulo 3 só a aplica às empresas-alvo do agente. O contrato v1 e o CRM não mudam. O pacote do módulo 1 entra sem as dependências pesadas (Streamlit, pandas), que o enriquecimento não usa. |
+| D67 | O módulo 3 relê o CSV do agente quando o arquivo muda, em vez de ler só ao subir. | A rotina do mês deixa de depender de reiniciar o contêiner; o agente já grava o CSV de uma vez (D63), então nunca se lê um arquivo pela metade. |
+| D68 | Perguntas respondidas pelo próprio agente (`agente servir`), com servidor HTTP da biblioteca padrão e o mesmo cliente Gemini da classificação. | Sem dependência nova no agente e sem outro serviço de LLM. A minimização de dados da D61 vale também para as perguntas. O serviço fica num perfil do compose: sem chave do Gemini, o CRM continua no modo simulado em vez de dar erro. |
+| D70 | HTTPS pelo Caddy, num perfil do compose; o nginx confia no `X-Forwarded-For` só vindo do endereço fixo do Caddy. | Certificado automático sem configuração. Confiar na faixa inteira deixaria forjar o IP da auditoria pela porta 8080, que chega pelo gateway da mesma rede. |
+| D72 | Os leads vêm dos produtos que cada empresa cliente descreve em texto; o agente monta o perfil (atividades CNAE, região, critérios), mostra a prévia e classifica na hora. Perfis fixos no repositório viram exemplo. Só o administrador da empresa descreve; teto de empresas por produto. | Pedido do usuário: o cliente explica o que vende, sem lista fixa de ramos. A lista de CNAEs da Receita já é o catálogo de ramos. O teto e a prévia impedem um produto vago de mandar milhares de empresas ao LLM. |
+| D73 | Um lead por CNPJ com todas as classificações (`classificacoes` no contrato v1, campo opcional); no CRM, `lead_perfil` guarda uma linha por lead × perfil. | O mesmo CNPJ pode ser alvo do produto de duas empresas. Cada uma vê o lead pela classificação do próprio produto, e as classificações das outras nunca saem do CRM. |
+| D74 | O agente fica no ar (`agente-api`), não mais num perfil opcional do compose. Com dados simulados e sem chave, as perguntas seguem simuladas. | Os produtos dependem dele. A D68 continua valendo para as perguntas. |
