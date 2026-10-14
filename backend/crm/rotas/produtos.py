@@ -53,7 +53,8 @@ def listar(request: Request, conn: sqlite3.Connection = Depends(db), cfg: Config
             sincronizar = True
         itens.append({"id": r["perfil_id"], "nome": r["nome"], "descricao": r["descricao"], "versao": r["versao"],
                       "criado_por": r["criado_por"], "criado_em": r["criado_em"], "atualizado_em": r["atualizado_em"],
-                      "filtro": a.get("filtro"), "criterios": a.get("criterios"), "execucao": a.get("execucao"),
+                      "filtro": a.get("filtro"), "atividades": a.get("atividades"), "criterios": a.get("criterios"),
+                      "execucao": a.get("execucao"),
                       "alvos": a.get("alvos")})
     if sincronizar:
         from ..sincronizacao import sincronizar_em_segundo_plano

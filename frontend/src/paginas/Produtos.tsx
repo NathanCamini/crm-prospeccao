@@ -120,7 +120,7 @@ export default function Produtos() {
             )}
           </div>
           <Situacao execucao={p.execucao} alvos={p.alvos} sincronizando={sincronizando} />
-          {p.filtro && <ResumoFiltro filtro={p.filtro} criterios={p.criterios ?? []} />}
+          {p.filtro && <ResumoFiltro filtro={p.filtro} criterios={p.criterios ?? []} atividades={p.atividades ?? undefined} />}
           <p className="nota">
             Descrito por {p.criado_por} em {data(p.criado_em)}
             {p.versao > 1 && ` · versão ${p.versao}, alterada em ${data(p.atualizado_em)}`}

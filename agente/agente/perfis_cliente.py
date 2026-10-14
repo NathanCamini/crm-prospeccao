@@ -246,7 +246,16 @@ class PerfisClientes:
     # ---------------------------------------------------------------- 3. listar e desativar
     def listar(self, dono: str) -> list[dict[str, Any]]:
         alvos = self.store.alvos_por_perfil()
-        return [self._publico(p, alvos) for p in self.store.perfis_cliente(dono)]
+        try:
+            catalogo = self.catalogo_cnae()
+        except (PropostaInvalidaError, ContratoInvalidoError, duckdb.Error):
+            catalogo = {}
+        itens = []
+        for p in self.store.perfis_cliente(dono):
+            item = self._publico(p, alvos)
+            item["atividades"] = _atividades(FiltroSQL.model_validate(p["perfil"]["filtro_sql"]), catalogo)
+            itens.append(item)
+        return itens
 
     def desativar(self, dono: str, perfil_id: str) -> None:
         self._do_dono(dono, perfil_id)

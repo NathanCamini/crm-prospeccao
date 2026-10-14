@@ -205,6 +205,7 @@ export interface Produto {
   criado_em: string;
   atualizado_em: string;
   filtro: FiltroProduto | null;
+  atividades?: { codigo: string; descricao: string; grupo?: boolean }[] | null;
   criterios: string[] | null;
   execucao: ExecucaoProduto | null;
   alvos: number | null;

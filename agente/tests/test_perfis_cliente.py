@@ -99,6 +99,7 @@ def test_salvar_classifica_na_hora_e_entrega_no_csv(ambiente) -> None:
     assert {r["cnpj"] for r in linhas if r["e_alvo"] == "sim"} == {A, G} and E in {r["cnpj"] for r in linhas}
     assert {r["perfil_nome"] for r in linhas} == {"Amenities para hotéis em SC"}
     assert [p["id"] for p in perfis.listar("7")] == [salvo["id"]]
+    assert {a["codigo"] for a in perfis.listar("7")[0]["atividades"]} == {"5510801", "5590"}
     assert perfis.listar("8") == []                                  # outra empresa cliente não vê
 
 
